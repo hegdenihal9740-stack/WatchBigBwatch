@@ -13,7 +13,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { prices } from "@/lib/cart";
 import {
   BUILT_IN,
   builtInWatchImage,
@@ -23,6 +22,7 @@ import {
   slugify,
   type ProductRow,
 } from "@/lib/products";
+import { watchPrices, type WatchTone } from "@/lib/watches";
 import { MAX_PRODUCT_IMAGES, productImageGallerySchema } from "@/lib/product-images";
 import {
   createStoreProduct,
@@ -99,7 +99,7 @@ export function ProductManager() {
       return {
         id,
         name: BUILT_NAMES[id]!,
-        price: row?.price ?? prices[id as keyof typeof prices],
+        price: row?.price ?? watchPrices[id as WatchTone],
         image: builtInWatchImage(id) as string,
         row,
         builtIn: true,

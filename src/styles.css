@@ -357,7 +357,7 @@ body:has(.plane-app) canvas {
   position: absolute;
   bottom: var(--padding);
   font-size: var(--font-size-medium);
-  opacity: 0;
+  opacity: 1;
 }
 
 .plane-app h1,

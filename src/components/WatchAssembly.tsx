@@ -37,48 +37,49 @@ export function WatchAssembly({ tone = 'steel' }: { tone?: WatchTone }) {
   const [reducedMotion, setReducedMotion] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const progress = useRef(0);
+  const isNearViewport = useRef(false);
+  const invalidate = useRef<(() => void) | null>(null);
   useEffect(() => {
     let frame = 0;
     const update = () => {
       frame = 0;
       const track = ref.current;
-      if (!track) return;
+      if (!track || !isNearViewport.current) return;
       const bounds = track.getBoundingClientRect();
       const stage = track.firstElementChild;
       const viewportHeight = stage?.getBoundingClientRect().height ?? window.innerHeight;
       progress.current = scrollAssemblyProgress(bounds.top, bounds.height, viewportHeight);
       track.dataset['progress'] = progress.current.toFixed(3);
+      invalidate.current?.();
     };
     const schedule = () => { if (!frame) frame = window.requestAnimationFrame(update); };
     update();
     window.addEventListener('scroll', schedule, { passive: true });
     window.addEventListener('resize', schedule);
+    const observer = new IntersectionObserver(entries => {
+      isNearViewport.current = entries.some(entry => entry.isIntersecting);
+      if (isNearViewport.current) {
+        setVisible(true);
+        schedule();
+      }
+    }, { rootMargin: '200px' });
+    if (ref.current) observer.observe(ref.current);
     return () => {
       window.cancelAnimationFrame(frame);
       window.removeEventListener('scroll', schedule);
       window.removeEventListener('resize', schedule);
+      observer.disconnect();
     };
   }, []);
   useEffect(() => {
     setMounted(true);
     const query = window.matchMedia('(prefers-reduced-motion: reduce)');
     const update = () => setReducedMotion(query.matches); update(); query.addEventListener('change', update);
-    // Latch visibility: once the scene has appeared, keep the canvas mounted.
-    // On mobile, the address bar showing/hiding while scrolling resizes the
-    // viewport and makes the observer flicker, which remounted the canvas and
-    // reset the animation to its first frame — looking "stuck".
-    const observer = new IntersectionObserver(entries => {
-      if (entries.some(e => e.isIntersecting)) {
-        setVisible(true);
-        observer.disconnect();
-      }
-    }, { rootMargin: '200px' });
-    if (ref.current) observer.observe(ref.current);
-    return () => { observer.disconnect(); query.removeEventListener('change', update); };
+    return () => { query.removeEventListener('change', update); };
   }, []);
   return <div ref={ref} className={`watch-assembly-track${reducedMotion ? ' watch-assembly-static' : ''}`} aria-hidden="true">
     <div className="watch-assembly-stage"><div className="watch-assembly-scene">
-    {mounted && visible && <Canvas dpr={[1, 1.5]} camera={{ position: [0, 0, 8.6], fov: 42 }} gl={{ antialias: true, alpha: true }}>
+    {mounted && visible && <Canvas frameloop="demand" onCreated={({ gl, invalidate: invalidateFrame }) => { gl.debug.checkShaderErrors = false; invalidate.current = invalidateFrame; invalidateFrame(); }} dpr={[1, 1.5]} camera={{ position: [0, 0, 8.6], fov: 42 }} gl={{ antialias: true, alpha: true }}>
       <ambientLight intensity={.8} />
       <directionalLight position={[3, 5, 6]} intensity={3} />
       <directionalLight position={[-4, -1, 3]} intensity={1.6} />

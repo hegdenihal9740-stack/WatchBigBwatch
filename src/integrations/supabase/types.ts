@@ -155,6 +155,84 @@ export type Database = {
         };
         Relationships: [];
       };
+      razorpay_payment_orders: {
+        Row: {
+          address: Json;
+          clear_cart: boolean;
+          created_at: string;
+          currency: string;
+          id: string;
+          idempotency_key: string;
+          items: Json;
+          payment_id: string | null;
+          payment_method: string;
+          razorpay_qr_code_id: string | null;
+          payment_method: string;
+          razorpay_qr_code_id: string | null;
+          razorpay_order_id: string | null;
+          status: string;
+          total: number;
+          updated_at: string;
+          user_id: string;
+        };
+        Insert: {
+          address: Json;
+          clear_cart?: boolean;
+          created_at?: string;
+          currency?: string;
+          id: string;
+          idempotency_key: string;
+          items: Json;
+          payment_id?: string | null;
+          payment_method?: string;
+          razorpay_qr_code_id?: string | null;
+          payment_method?: string;
+          razorpay_qr_code_id?: string | null;
+          razorpay_order_id?: string | null;
+          status?: string;
+          total: number;
+          updated_at?: string;
+          user_id: string;
+        };
+        Update: {
+          address?: Json;
+          clear_cart?: boolean;
+          created_at?: string;
+          currency?: string;
+          id?: string;
+          idempotency_key?: string;
+          items?: Json;
+          payment_id?: string | null;
+          payment_method?: string;
+          razorpay_qr_code_id?: string | null;
+          payment_method?: string;
+          razorpay_qr_code_id?: string | null;
+          razorpay_order_id?: string | null;
+          status?: string;
+          total?: number;
+          updated_at?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
+      razorpay_webhook_events: {
+        Row: {
+          event_id: string;
+          payment_order_id: string;
+          received_at: string;
+        };
+        Insert: {
+          event_id: string;
+          payment_order_id: string;
+          received_at?: string;
+        };
+        Update: {
+          event_id?: string;
+          payment_order_id?: string;
+          received_at?: string;
+        };
+        Relationships: [];
+      };
       products: {
         Row: {
           active: boolean;
@@ -313,6 +391,15 @@ export type Database = {
           _user_id: string;
         };
         Returns: boolean;
+      };
+      finalize_razorpay_payment: {
+        Args: {
+          _event_id?: string | null;
+          _order_id: string;
+          _payment_id?: string | null;
+          _payment_status: string;
+        };
+        Returns: Json;
       };
       store_has_owner: { Args: never; Returns: boolean };
       transfer_store_owner: { Args: { _new_email: string }; Returns: string };

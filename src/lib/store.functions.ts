@@ -21,6 +21,20 @@ const productFields = z.object({
 const newProductFields = productFields
   .omit({ image_url: true, images: true })
   .extend({ images: productImageGallerySchema });
+const productChanges = productFields
+  .partial()
+  .extend({ active: z.boolean().optional() })
+  .transform((changes) => ({
+    ...(changes.name !== undefined ? { name: changes.name } : {}),
+    ...(changes.finish !== undefined ? { finish: changes.finish } : {}),
+    ...(changes.price !== undefined ? { price: changes.price } : {}),
+    ...(changes.list_price !== undefined ? { list_price: changes.list_price } : {}),
+    ...(changes.description !== undefined ? { description: changes.description } : {}),
+    ...(changes.details !== undefined ? { details: changes.details } : {}),
+    ...(changes.image_url !== undefined ? { image_url: changes.image_url } : {}),
+    ...(changes.images !== undefined ? { images: changes.images } : {}),
+    ...(changes.active !== undefined ? { active: changes.active } : {}),
+  }));
 const orderStatus = z.enum(["confirmed", "packed", "shipped", "out_for_delivery", "delivered"]);
 const courier = z.enum(["Delhivery", "Blue Dart", "DTDC", "India Post", "Shiprocket", "Other"]);
 const orderTracking = z.object({
@@ -66,13 +80,10 @@ export const updateStoreProduct = createServerFn({ method: "POST" })
   .validator(
     z.object({
       id: productId,
-      changes: productFields
-        .partial()
-        .extend({ active: z.boolean().optional() })
-        .refine(
-          (changes) => Object.keys(changes).length > 0,
-          "Provide at least one product change.",
-        ),
+      changes: productChanges.refine(
+        (changes) => Object.keys(changes).length > 0,
+        "Provide at least one product change.",
+      ),
     }),
   )
   .handler(async ({ data, context }) => {

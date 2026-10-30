@@ -61,12 +61,12 @@ describe("seller product catalog", () => {
 
     applyProducts(originals);
 
-    expect(prices.steel).toBe(13000);
+    expect(prices["steel"]).toBe(13000);
     expect(watches.some((watch) => watch.id === "steel")).toBe(true);
     expect(watches.some((watch) => watch.id === "black")).toBe(false);
 
     applyProducts([]);
-    expect(prices.steel).toBe(12800);
+    expect(prices["steel"]).toBe(12800);
     expect(watches.some((watch) => watch.id === "black")).toBe(true);
   });
 });

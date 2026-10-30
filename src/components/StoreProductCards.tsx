@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { ScanLine, Search, Star } from "lucide-react";
 import { toast } from "sonner";
-import { cart, prices } from "@/lib/cart";
+import { cart, getProductPrice } from "@/lib/cart";
 import { watches, type WatchTone } from "@/lib/watches";
 import { ensureProducts, isBuiltIn } from "@/lib/products";
 import { cardMeta as meta } from "@/lib/watch-meta";
@@ -36,8 +36,8 @@ export function WatchProductCard({ tone }: { tone: WatchTone }) {
     day: "numeric",
   });
   const m = meta[w.id];
-  const price = prices[w.id];
-  const off = Math.round((1 - price / m.list) * 100);
+  const price = getProductPrice(w.id);
+  const off = price === undefined ? 0 : Math.round((1 - price / m.list) * 100);
   return (
     <article className="store-card-card">
       {m.badge && <span className="store-card-badge">{m.badge}</span>}
@@ -51,7 +51,9 @@ export function WatchProductCard({ tone }: { tone: WatchTone }) {
         </Link>
         <p className="store-card-specs">{m.specs.join(" · ")}</p>
         <div className="store-card-price-row">
-          <span className="store-card-price">₹{usd(price)}</span>
+          <span className="store-card-price">
+            ₹{price === undefined ? "Unavailable" : usd(price)}
+          </span>
           <s className="store-card-muted">₹{usd(m.list)}</s>
           <span className="store-card-off">−{off}%</span>
         </div>
@@ -82,6 +84,7 @@ export function WatchProductCard({ tone }: { tone: WatchTone }) {
         <button
           type="button"
           className="store-card-add"
+          disabled={price === undefined}
           onClick={() => {
             cart.add(w.id);
             toast.success(`${w.name} added to cart`);
@@ -157,15 +160,19 @@ export function StoreProductCards() {
         ({ w }) =>
           (filter === "all" || w.id === filter) &&
           (!term ||
-            [w.name, w.finish, ...w.details, ...meta[w.id].specs]
+            [w.name, w.finish, ...w.details, ...(meta[w.id]?.specs ?? [])]
               .join(" ")
               .toLowerCase()
               .includes(term)),
       );
     const by: Record<Sort, (a: (typeof found)[number], b: (typeof found)[number]) => number> = {
       popular: (a, b) => meta[b.w.id].reviews - meta[a.w.id].reviews,
-      low: (a, b) => prices[a.w.id] - prices[b.w.id],
-      high: (a, b) => prices[b.w.id] - prices[a.w.id],
+      low: (a, b) =>
+        (getProductPrice(a.w.id) ?? Number.MAX_SAFE_INTEGER) -
+        (getProductPrice(b.w.id) ?? Number.MAX_SAFE_INTEGER),
+      high: (a, b) =>
+        (getProductPrice(b.w.id) ?? Number.MAX_SAFE_INTEGER) -
+        (getProductPrice(a.w.id) ?? Number.MAX_SAFE_INTEGER),
       rating: (a, b) => meta[b.w.id].rating - meta[a.w.id].rating,
       new: (a, b) => b.i - a.i,
     };

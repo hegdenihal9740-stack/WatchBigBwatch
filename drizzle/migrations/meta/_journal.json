@@ -50,6 +50,20 @@
       "when": 1793088060000,
       "tag": "20261027140100_remove_legacy_payment_intents",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793256538757,
+      "tag": "20261029064858_razorpay_payment_orders",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793351148073,
+      "tag": "20261030143500_razorpay_upi_qr",
+      "breakpoints": true
     }
   ]
 }

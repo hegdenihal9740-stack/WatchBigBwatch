@@ -3,6 +3,8 @@ import "./lib/error-capture";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 
+const RAZORPAY_WEBHOOK_PATH = "/api/webhooks/razorpay";
+
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
 };
@@ -47,6 +49,17 @@ function isH3SwallowedErrorBody(body: string): boolean {
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      if (new URL(request.url).pathname === RAZORPAY_WEBHOOK_PATH) {
+        if (request.method !== "POST") {
+          return new Response("Method not allowed", {
+            status: 405,
+            headers: { allow: "POST" },
+          });
+        }
+        const { handleRazorpayWebhook } = await import("./lib/razorpay.server");
+        return await handleRazorpayWebhook(request);
+      }
+
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);

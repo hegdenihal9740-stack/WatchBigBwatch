@@ -88,7 +88,15 @@ function Invoice() {
               ? "Cash on delivery"
               : o.payment === "upi"
                 ? "UPI payment verified by store"
-                : "Paid online"}
+                : o.payment === "razorpay"
+                  ? "Razorpay payment verified"
+                  : "Paid online"}
+            {o.payment === "razorpay" && o.paymentReference && (
+              <>
+                <br />
+                Razorpay reference <b>{o.paymentReference}</b>
+              </>
+            )}
           </p>
         </div>
       </header>
@@ -138,7 +146,11 @@ function Invoice() {
             <td colSpan={3}>
               <b>
                 Total{" "}
-                {o.payment === "cod" ? "(collect in cash)" : o.payment === "upi" ? "(paid)" : ""}
+                {o.payment === "cod"
+                  ? "(collect in cash)"
+                  : o.payment === "upi" || o.payment === "razorpay"
+                    ? "(paid)"
+                    : ""}
               </b>
             </td>
             <td>

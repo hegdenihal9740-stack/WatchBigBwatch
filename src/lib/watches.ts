@@ -1,7 +1,7 @@
-import watchSteel from '@/assets/watch-steel.png';
-import watchBlack from '@/assets/watch-black.png';
-import watchGold from '@/assets/watch-gold.png';
-import watchRosegold from '@/assets/watch-rosegold.png';
+import watchSteel from '@/assets/watch-steel.webp';
+import watchBlack from '@/assets/watch-black.webp';
+import watchGold from '@/assets/watch-gold.webp';
+import watchRosegold from '@/assets/watch-rosegold.webp';
 
 export const watches = [
   { id: 'steel', name: 'Steel Diver', finish: 'Brushed steel', image: watchSteel, description: 'Cool brushed metal, a dark dial and a sculpted bracelet. A study in sharp contrasts.', details: ['Dark dial', 'Date window', 'Linked bracelet'] },

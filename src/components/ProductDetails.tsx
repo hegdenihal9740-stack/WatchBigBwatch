@@ -22,10 +22,10 @@ import steelJpg from "@/assets/watch-steel.jpg";
 import blackJpg from "@/assets/watch-black.jpg";
 import goldJpg from "@/assets/watch-gold.jpg";
 import roseJpg from "@/assets/watch-rosegold.jpg";
-import steelTry from "@/assets/try-on-steel.png";
-import blackTry from "@/assets/try-on-black.png";
-import goldTry from "@/assets/try-on-gold.png";
-import roseTry from "@/assets/try-on-rosegold.png";
+import steelTry from "@/assets/try-on-steel.webp";
+import blackTry from "@/assets/try-on-black.webp";
+import goldTry from "@/assets/try-on-gold.webp";
+import roseTry from "@/assets/try-on-rosegold.webp";
 import steelHand from "@/assets/hand-steel.jpg";
 import blackHand from "@/assets/hand-black.jpg";
 import goldHand from "@/assets/hand-gold.jpg";
@@ -71,7 +71,7 @@ const extra: Record<WatchTone, string[]> = {
   rosegold: [roseHand, roseJpg, roseTry],
 };
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { cart, prices } from "@/lib/cart";
+import { cart, getProductPrice } from "@/lib/cart";
 import { watches, type WatchTone } from "@/lib/watches";
 import { createAuthEntryPath, saveBrowserOAuthReturnPath } from "@/lib/auth-redirect";
 
@@ -110,8 +110,9 @@ export function ProductDetails({
       : [];
   const stock = useStock();
   const left = stock?.[active];
-  const sold = left !== undefined && left <= 0;
-  const price = prices[w.id];
+  const price = getProductPrice(w.id);
+  const sold = price === undefined || (left !== undefined && left <= 0);
+  const priceLabel = price === undefined ? "Price unavailable" : `₹${usd(price)}`;
   const wish = useWishlist();
   const imgs = productImages.length
     ? [...productImages, ...(specs.length ? [`${FEAT}${w.id}`] : [])]
@@ -124,7 +125,7 @@ export function ProductDetails({
   const feat = <FeatureCard img={w.image} labels={specs.map(({ value }) => value)} />;
   const [idx, setIdx] = useState(0);
   const [zoom, setZoom] = useState(false);
-  const off = Math.round((1 - price / m.list) * 100);
+  const off = price === undefined ? 0 : Math.round((1 - price / m.list) * 100);
   const deliveryDate = new Date(Date.now() + 3 * 86400000).toLocaleDateString("en-US", {
     weekday: "short",
     month: "short",
@@ -200,6 +201,10 @@ export function ProductDetails({
     return () => io.disconnect();
   }, [asPage]);
   const buyNow = () => {
+    if (price === undefined) {
+      toast.error("This watch's price is unavailable. Please refresh the collection.");
+      return;
+    }
     if (!customer) {
       toast.info("Please log in to continue with your purchase");
       const returnPath = `/shop/${encodeURIComponent(w.id)}`;
@@ -216,6 +221,10 @@ export function ProductDetails({
     onOpenChange(false);
   };
   const addCart = () => {
+    if (price === undefined) {
+      toast.error("This watch's price is unavailable. Please refresh the collection.");
+      return;
+    }
     cart.add(w.id);
     toast.success(`${w.name} added to cart`);
   };
@@ -318,7 +327,7 @@ export function ProductDetails({
               </div>
               <p className="product-special">Special Price</p>
               <div className="product-price-row">
-                <span className="product-price">₹{usd(price)}</span>
+                <span className="product-price">{priceLabel}</span>
                 <s className="product-muted">₹{usd(m.list)}</s>
                 <span className="product-off">{off}% off</span>
               </div>
@@ -390,7 +399,7 @@ export function ProductDetails({
               <a
                 className="product-wa"
                 href={whatsappLink(
-                  `Hi! I'm interested in the BIG-B ${w.name} (₹${usd(price)}). Can you share live photos and the delivery timeline?`,
+                  `Hi! I'm interested in the BIG-B ${w.name} (${priceLabel}). Can you share live photos and the delivery timeline?`,
                 )}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -492,7 +501,12 @@ export function ProductDetails({
                         <img src={r.image} alt={r.name} />
                         <span className="product-rec-name">{r.name}</span>
                         <span className="product-rec-sub">{r.finish}</span>
-                        <span className="product-rec-price">₹{usd(prices[r.id])}</span>
+                        <span className="product-rec-price">
+                          ₹
+                          {getProductPrice(r.id) === undefined
+                            ? "Unavailable"
+                            : usd(getProductPrice(r.id)!)}
+                        </span>
                       </button>
                     ))}
                 </div>

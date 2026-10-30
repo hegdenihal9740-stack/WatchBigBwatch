@@ -279,7 +279,7 @@ export async function updateStoreOrder(userId: string, id: string, changes: Orde
     throw new Error("Could not update this order. Please try again.");
   }
   if (!data) throw new Error("This order no longer exists.");
-  if (changes.status === existing.status) return { notifications: null };
+  if (!changes.status || changes.status === existing.status) return { notifications: null };
   return { notifications: await notifyStoreOrderStatus(userId, id, changes.status) };
 }
 
@@ -328,7 +328,7 @@ export async function notifyStoreOrderStatus(
 
   return sendOrderNotifications({
     orderId: order.id,
-    email: account?.user.email ?? null,
+    email: account?.user?.email ?? null,
     name: typeof address["name"] === "string" ? address["name"] : "Customer",
     mobile: typeof address["mobile"] === "string" ? address["mobile"] : "",
     total: order.total,

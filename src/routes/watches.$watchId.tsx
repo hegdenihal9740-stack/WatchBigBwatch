@@ -1,16 +1,19 @@
 import { createFileRoute, Link, notFound, useNavigate } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { ArrowLeft, Pause, Play, RotateCcw, Minus, Plus, ScanLine, ShoppingBag } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { WatchScene } from '@/components/WatchScene';
 import { WatchAssembly } from '@/components/WatchAssembly';
 import { WatchGallery } from '@/components/WatchGallery';
-import { VirtualTryOn } from '@/components/VirtualTryOn';
 import { watches } from '@/lib/watches';
 import { cart } from '@/lib/cart';
 import { goBackOrTo } from '@/lib/back';
 import { MidnightBackdrop } from '@/components/MidnightBackdrop';
+
+const VirtualTryOn = lazy(() =>
+  import('@/components/VirtualTryOn').then(module => ({ default: module.VirtualTryOn })),
+);
 
 export const Route = createFileRoute('/watches/$watchId')({
   ssr: false,
@@ -64,6 +67,6 @@ function WatchPage() {
     </div>
     <nav className="watch-finish-nav" aria-label="Watch finishes">{watches.map(w => <Button key={w.id} asChild variant="ghost" className={w.id === watch.id ? 'selected' : ''}><Link to="/watches/$watchId" params={{ watchId: w.id }}><span className="watch-swatch" data-tone={w.id} />{w.finish}</Link></Button>)}</nav>
     <WatchGallery key={watch.id} watch={watch} />
-    <VirtualTryOn watch={watch} open={tryOnOpen} onClose={closeTryOn} />
+    {tryOnOpen && <Suspense fallback={null}><VirtualTryOn watch={watch} open onClose={closeTryOn} /></Suspense>}
   </main>;
 }

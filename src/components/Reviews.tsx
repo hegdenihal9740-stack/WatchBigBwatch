@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { isSupabaseConfigured } from "@/lib/supabase-config";
 import { AuthLink } from "@/components/AuthLink";
+import { useCustomer } from "@/components/CustomerAccounts";
 
 type Review = {
   id: string;
@@ -21,13 +22,14 @@ const MAX_BYTES = 5 * 1024 * 1024;
 export function Reviews({ tone, rating, total }: { tone: string; rating: number; total: number }) {
   const [list, setList] = useState<Review[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
-  const [signedIn, setSignedIn] = useState(false);
   const [stars, setStars] = useState(5);
   const [name, setName] = useState("");
   const [text, setText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState<string | null>(null);
+  const { user, ready } = useCustomer();
+  const signedIn = Boolean(user);
 
   const load = useCallback(async () => {
     try {
@@ -61,28 +63,20 @@ export function Reviews({ tone, rating, total }: { tone: string; rating: number;
     if (!isSupabaseConfigured()) {
       setList([]);
       setUrls({});
-      setSignedIn(false);
       return;
     }
     void load();
-    void supabase.auth
-      .getUser()
-      .then(({ data, error }) => {
-        if (error) throw error;
-        setSignedIn(!!data.user);
-        const meta = data.user?.user_metadata ?? {};
-        setName(
-          String(
-            meta["display_name"] ?? meta["full_name"] ?? data.user?.email?.split("@")[0] ?? "",
-          ),
-        );
-      })
-      .catch((error: unknown) => {
-        console.error("Could not verify review author.", error);
-        setSignedIn(false);
-        toast.error("Please sign in again to write a review.");
-      });
   }, [load]);
+  useEffect(() => {
+    if (!user) {
+      setName("");
+      return;
+    }
+    const meta = user.user_metadata ?? {};
+    setName(
+      String(meta["display_name"] ?? meta["full_name"] ?? user.email?.split("@")[0] ?? ""),
+    );
+  }, [user]);
 
   const pick = (list: FileList | null) => {
     const next = [...files];
@@ -183,7 +177,9 @@ export function Reviews({ tone, rating, total }: { tone: string; rating: number;
           ))}
         </div>
       </div>
-      {signedIn ? (
+      {!ready ? (
+        <p className="product-muted">Checking your account…</p>
+      ) : signedIn ? (
         <div className="rv-form">
           <div className="rv-stars" role="radiogroup" aria-label="Your rating">
             {[1, 2, 3, 4, 5].map((s) => (

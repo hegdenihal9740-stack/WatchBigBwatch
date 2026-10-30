@@ -1,17 +1,20 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { MidnightBackdrop } from "@/components/MidnightBackdrop";
 import type { WatchTone } from "@/lib/watches";
-import watchGold from "@/assets/watch-gold.png";
-import watchSteel from "@/assets/watch-steel.png";
-import watchRosegold from "@/assets/watch-rosegold.png";
-import watchBlack from "@/assets/watch-black.png";
+import watchGold from "@/assets/watch-gold.webp";
+import watchSteel from "@/assets/watch-steel.webp";
+import watchRosegold from "@/assets/watch-rosegold.webp";
+import watchBlack from "@/assets/watch-black.webp";
 import tryonArm from "@/assets/tryon-arm.jpg";
 import { tryOnImages } from "@/lib/try-on-images";
-import { VirtualTryOn } from "@/components/VirtualTryOn";
 import { watches as watchList } from "@/lib/watches";
 import { SiteFooter } from "@/components/SiteFooter";
 import bigBLogoDark from "@/assets/big-b-logo-dark.png";
+
+const VirtualTryOn = lazy(() =>
+  import("@/components/VirtualTryOn").then((module) => ({ default: module.VirtualTryOn })),
+);
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -71,19 +74,15 @@ function Index() {
 
   useEffect(() => {
     let disposed = false;
+    let sceneStarted = false;
     const cleanups: Array<() => void> = [];
 
-    (async () => {
-      const [{ gsap }, { ScrollTrigger }, { ScrollToPlugin }, THREE, { RoomEnvironment }] =
-        await Promise.all([
-          import("gsap"),
-          import("gsap/ScrollTrigger"),
-          import("gsap/ScrollToPlugin"),
-          import("three"),
-          import("three/examples/jsm/environments/RoomEnvironment.js"),
-        ]);
+    const loadScene = async () => {
+      const [THREE, { RoomEnvironment }] = await Promise.all([
+        import("three"),
+        import("three/examples/jsm/environments/RoomEnvironment.js"),
+      ]);
       if (disposed) return;
-      gsap.registerPlugin(ScrollTrigger, ScrollToPlugin);
       const watches = Array.from(rootRef.current?.querySelectorAll<HTMLImageElement>(".watch-img") ?? []);
       cleanups.push(() => watches.forEach(watch => watch.style.removeProperty("--watch-proximity")));
       const root = rootRef.current;
@@ -123,10 +122,11 @@ function Index() {
           ];
 
           this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+          this.renderer.debug.checkShaderErrors = false;
           this.renderer.setSize(window.innerWidth, window.innerHeight);
-          this.renderer.shadowMap.enabled = true;
-          this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-          this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+          this.renderer.setPixelRatio(
+            Math.min(window.devicePixelRatio, window.innerWidth < 768 ? 1.5 : 1.75),
+          );
           this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
            this.renderer.toneMappingExposure = 1.35;
           document.body.appendChild(this.renderer.domElement);
@@ -176,15 +176,7 @@ function Index() {
           this.onResize();
           window.addEventListener("resize", this.onResize, false);
 
-          let raf = 0;
-          const animate = () => {
-            this.render();
-            raf = requestAnimationFrame(animate);
-          };
-          animate();
-
           cleanups.push(() => {
-            cancelAnimationFrame(raf);
             window.removeEventListener("resize", this.onResize);
             this.renderer.domElement.remove();
             this.renderer.dispose();
@@ -300,19 +292,16 @@ function Index() {
         };
       }
 
-      function setupAnimation(model: any) {
+      async function setupAnimation(scene: any) {
         if (disposed) return;
-        const scene = new Scene(model);
+        const { gsap } = await import("gsap");
+        if (disposed) return;
         const plane = scene.modelGroup;
+        const jetCanvas = scene.renderer.domElement;
+        let timeline: ReturnType<typeof gsap.timeline>;
 
         const ctx = gsap.context(() => {
-          gsap.fromTo(
-            scene.renderer.domElement,
-            { x: "50%", autoAlpha: 0 },
-            { duration: 1, x: "0%", autoAlpha: 1, delay: 0.5 },
-          );
            gsap.to(".loading", { autoAlpha: 0, duration: 0.4 });
-          gsap.to(".scroll-cta", { opacity: 1 });
 
           const tau = Math.PI * 2;
           // On narrow screens the camera sees a thinner slice of the scene, so
@@ -329,84 +318,105 @@ function Index() {
           // The jet keeps flying right up to the "See it on your wrist." heading,
           // then fades out. A plain toggle (not a scrubbed tween) so a fast flick
           // can't leave it showing over the try-on copy.
-          const jetCanvas = scene.renderer.domElement;
-          ScrollTrigger.create({
-            trigger: "#tryon-title",
-            start: "top 72%",
-            end: "max",
-            onEnter: () => gsap.to(jetCanvas, { autoAlpha: 0, duration: 0.4, overwrite: "auto" }),
-            onLeaveBack: () => gsap.to(jetCanvas, { autoAlpha: 1, duration: 0.4, overwrite: "auto" }),
-          });
-
-
-          const tl = gsap.timeline({
+          timeline = gsap.timeline({
             onUpdate: scene.render,
-            scrollTrigger: {
-              trigger: ".content",
-              scrub: true,
-              start: "top top",
-              endTrigger: ".tryon-showcase",
-              end: "top top",
-              invalidateOnRefresh: true,
-            },
+            paused: true,
             defaults: { duration: sectionDuration, ease: "power2.inOut" },
           });
 
           let delay = 0;
-          tl.to(".scroll-cta", { duration: 0.25, opacity: 0 }, delay);
-           tl.to(plane.position, { x: () => -10 * pathScale(), ease: "power1.in" }, delay);
+          timeline.to(".scroll-cta", { duration: 0.25, opacity: 0 }, delay);
+           timeline.to(plane.position, { x: () => -10 * pathScale(), ease: "power1.in" }, delay);
 
           delay += sectionDuration;
-          tl.to(plane.rotation, { x: tau * 0.25, y: 0, z: -tau * 0.05, ease: "power1.inOut" }, delay);
-          tl.to(plane.position, { x: () => -40 * pathScale(), y: 0, z: -60, ease: "power1.inOut" }, delay);
+          timeline.to(plane.rotation, { x: tau * 0.25, y: 0, z: -tau * 0.05, ease: "power1.inOut" }, delay);
+          timeline.to(plane.position, { x: () => -40 * pathScale(), y: 0, z: -60, ease: "power1.inOut" }, delay);
 
           delay += sectionDuration;
-          tl.to(plane.rotation, { x: tau * 0.25, y: 0, z: tau * 0.05, ease: "power3.inOut" }, delay);
-          tl.to(plane.position, { x: () => 40 * pathScale(), y: 0, z: -60, ease: "power2.inOut" }, delay);
+          timeline.to(plane.rotation, { x: tau * 0.25, y: 0, z: tau * 0.05, ease: "power3.inOut" }, delay);
+          timeline.to(plane.position, { x: () => 40 * pathScale(), y: 0, z: -60, ease: "power2.inOut" }, delay);
 
           delay += sectionDuration;
-          tl.to(plane.rotation, { x: tau * 0.2, y: 0, z: -tau * 0.1, ease: "power3.inOut" }, delay);
-          tl.to(plane.position, { x: () => -40 * pathScale(), y: 0, z: -30, ease: "power2.inOut" }, delay);
+          timeline.to(plane.rotation, { x: tau * 0.2, y: 0, z: -tau * 0.1, ease: "power3.inOut" }, delay);
+          timeline.to(plane.position, { x: () => -40 * pathScale(), y: 0, z: -30, ease: "power2.inOut" }, delay);
 
           delay += sectionDuration;
-          tl.to(plane.rotation, { x: 0, z: 0, y: tau * 0.25 }, delay);
-          tl.to(plane.position, { x: 0, y: -10, z: 50 }, delay);
+          timeline.to(plane.rotation, { x: 0, z: 0, y: tau * 0.25 }, delay);
+          timeline.to(plane.position, { x: 0, y: -10, z: 50 }, delay);
 
           delay += sectionDuration * 2;
-          tl.to(plane.rotation, { x: tau * 0.25, y: tau * 0.5, z: 0, ease: "power4.inOut" }, delay);
-          tl.to(plane.position, { z: 30, ease: "power4.inOut" }, delay);
+          timeline.to(plane.rotation, { x: tau * 0.25, y: tau * 0.5, z: 0, ease: "power4.inOut" }, delay);
+          timeline.to(plane.position, { z: 30, ease: "power4.inOut" }, delay);
 
           delay += sectionDuration;
-          tl.to(plane.rotation, { x: tau * 0.25, y: tau * 0.5, z: 0, ease: "power4.inOut" }, delay);
-          tl.to(plane.position, { z: 60, x: () => 30 * pathScale(), ease: "power4.inOut" }, delay);
+          timeline.to(plane.rotation, { x: tau * 0.25, y: tau * 0.5, z: 0, ease: "power4.inOut" }, delay);
+          timeline.to(plane.position, { z: 60, x: () => 30 * pathScale(), ease: "power4.inOut" }, delay);
 
           delay += sectionDuration;
-          tl.to(
+          timeline.to(
             plane.rotation,
             { x: tau * 0.35, y: tau * 0.75, z: tau * 0.6, ease: "power4.inOut" },
             delay,
           );
-          tl.to(plane.position, { z: 35, x: () => 20 * pathScale(), y: 0, ease: "power4.inOut" }, delay);
+          timeline.to(plane.position, { z: 35, x: () => 20 * pathScale(), y: 0, ease: "power4.inOut" }, delay);
 
           delay += sectionDuration;
-          tl.to(plane.rotation, { x: tau * 0.15, y: tau * 0.85, z: 0, ease: "power1.in" }, delay);
-          tl.to(plane.position, { z: -150, x: 0, y: 0, ease: "power1.inOut" }, delay);
+          timeline.to(plane.rotation, { x: tau * 0.15, y: tau * 0.85, z: 0, ease: "power1.in" }, delay);
+          timeline.to(plane.position, { z: -150, x: 0, y: 0, ease: "power1.inOut" }, delay);
 
           delay += sectionDuration;
-          tl.to(
+          timeline.to(
             plane.rotation,
             { duration: sectionDuration, x: -tau * 0.05, y: tau, z: -tau * 0.1, ease: "none" },
             delay,
           );
-          tl.to(
+          timeline.to(
             plane.position,
             { duration: sectionDuration, x: 0, y: 30, z: 320, ease: "power1.in" },
             delay,
           );
-          tl.to(scene.light.position, { duration: sectionDuration, x: 0, y: 0, z: 0 }, delay);
+          timeline.to(scene.light.position, { duration: sectionDuration, x: 0, y: 0, z: 0 }, delay);
         });
 
-        cleanups.push(() => ctx.revert());
+        const content = root?.querySelector(".content");
+        const showcase = root?.querySelector(".tryon-showcase");
+        const title = root?.querySelector("#tryon-title");
+        let frame = 0;
+        let jetHidden = false;
+        const updateFromScroll = () => {
+          frame = 0;
+          if (!content || !showcase || !title) return;
+          const start = content.getBoundingClientRect().top + window.scrollY;
+          const end = showcase.getBoundingClientRect().top + window.scrollY;
+          const progress = THREE.MathUtils.clamp(
+            (window.scrollY - start) / Math.max(1, end - start),
+            0,
+            1,
+          );
+          timeline.progress(progress);
+
+          const shouldHideJet = title.getBoundingClientRect().top <= window.innerHeight * 0.72;
+          if (shouldHideJet !== jetHidden) {
+            jetHidden = shouldHideJet;
+            gsap.to(jetCanvas, {
+              autoAlpha: jetHidden ? 0 : 1,
+              duration: 0.4,
+              overwrite: "auto",
+            });
+          }
+        };
+        const scheduleUpdate = () => {
+          if (!frame) frame = window.requestAnimationFrame(updateFromScroll);
+        };
+        window.addEventListener("scroll", scheduleUpdate, { passive: true });
+        window.addEventListener("resize", scheduleUpdate);
+        cleanups.push(() => {
+          window.removeEventListener("scroll", scheduleUpdate);
+          window.removeEventListener("resize", scheduleUpdate);
+          if (frame) window.cancelAnimationFrame(frame);
+          ctx.revert();
+        });
+        scheduleUpdate();
       }
 
 
@@ -537,21 +547,44 @@ function Index() {
       paint.color.set(0x181a20);
       paint.sheen = 1; paint.sheenColor = new THREE.Color(0xd9b36c); paint.sheenRoughness = .35;
       jet.scale.setScalar(JET_SCALE);
-      setupAnimation(jet);
-    })();
+      const pathScale = () =>
+        Math.min(1, Math.max(0.35, (window.innerWidth / window.innerHeight) / 1.3));
+      jet.rotation.y = Math.PI * -0.5;
+      jet.position.set(18 * pathScale(), -8, 0);
+      const scene = new Scene(jet);
+      scene.render();
+      let animationStarted = false;
+      const startAnimation = () => {
+        if (animationStarted) return;
+        animationStarted = true;
+        window.removeEventListener("scroll", startAnimation);
+        void setupAnimation(scene);
+      };
+      window.addEventListener("scroll", startAnimation, { once: true, passive: true });
+      cleanups.push(() => window.removeEventListener("scroll", startAnimation));
+      if (window.scrollY > 0) startAnimation();
+    };
+
+    const startScene = () => {
+      if (sceneStarted || disposed) return;
+      sceneStarted = true;
+      window.removeEventListener("scroll", startScene);
+      void loadScene();
+    };
+
+    window.addEventListener("scroll", startScene, { once: true, passive: true });
 
     return () => {
       disposed = true;
+      window.removeEventListener("scroll", startScene);
       cleanups.forEach((fn) => fn());
     };
   }, []);
 
-  const scrollToBottom = async () => {
-    const { gsap } = await import("gsap");
-    gsap.to(window, {
-      duration: 1.5,
-      scrollTo: { y: ".tryon-showcase", autoKill: false },
-      ease: "power2.inOut",
+  const scrollToBottom = () => {
+    document.querySelector(".tryon-showcase")?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "start",
     });
   };
 
@@ -564,7 +597,11 @@ function Index() {
   return (
     <div ref={rootRef} className="plane-app" data-tone="steel" onClick={openFromImage}>
       <MidnightBackdrop />
-      {tryOnWatch && <VirtualTryOn watch={tryOnWatch} open onClose={() => setTryOnTone(null)} />}
+      {tryOnWatch && (
+        <Suspense fallback={null}>
+          <VirtualTryOn watch={tryOnWatch} open onClose={() => setTryOnTone(null)} />
+        </Suspense>
+      )}
       <nav className="site-nav" aria-label="Main navigation">
         <a className="site-brand" href="#top" aria-label="BIG-B home"><img className="site-brand-logo" src={bigBLogoDark} alt="" /><span>BIG-B</span></a>
         <span className="site-nav-note">A study in time & motion</span>
@@ -614,8 +651,8 @@ function Index() {
             <div className="tryon-demo" aria-hidden="true">
               <div className="tryon-demo-frame">
                 <div className="tryon-rotor">
-                  <img src={tryonArm} alt="" className="tryon-arm" width={768} height={1024} loading="lazy" />
-                  {[tryOnImages.steel, tryOnImages.gold, tryOnImages.rosegold, tryOnImages.black].map((src, i) => <img key={src} src={src} alt="" className="tryon-demo-watch" style={{ animationDelay: `${i * 3}s` }} />)}
+                  <img src={tryonArm} alt="" className="tryon-arm" width={768} height={1024} loading="lazy" decoding="async" />
+                  {[tryOnImages.steel, tryOnImages.gold, tryOnImages.rosegold, tryOnImages.black].map((src, i) => <img key={src} src={src} alt="" className="tryon-demo-watch" loading="lazy" decoding="async" style={{ animationDelay: `${i * 3}s` }} />)}
                 </div>
                 <div className="tryon-scan" />
                 <span className="tryon-badge">● Fitted to your wrist</span>

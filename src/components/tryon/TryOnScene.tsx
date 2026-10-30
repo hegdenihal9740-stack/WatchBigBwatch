@@ -90,7 +90,7 @@ function Rig({ finish, target, ambient, caseMm = 42 }: SceneProps) {
 }
 
 export function TryOnScene(props: SceneProps) {
-  return <Canvas className="try-on-canvas" orthographic dpr={[1, 1.5]} camera={{ position: [0, 0, 3000], near: 1, far: 6000, zoom: 1 }} gl={{ alpha: true, antialias: true, preserveDrawingBuffer: true, toneMapping: THREE.ACESFilmicToneMapping }}>
+  return <Canvas className="try-on-canvas" onCreated={({ gl }) => { gl.debug.checkShaderErrors = false; }} orthographic dpr={[1, 1.5]} camera={{ position: [0, 0, 3000], near: 1, far: 6000, zoom: 1 }} gl={{ alpha: true, antialias: true, preserveDrawingBuffer: true, toneMapping: THREE.ACESFilmicToneMapping }}>
     <Suspense fallback={null}>
       <Environment resolution={256}>
         <Lightformer intensity={4} position={[0, 5, 2]} scale={[10, 3, 1]} />

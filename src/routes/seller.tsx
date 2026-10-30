@@ -23,6 +23,7 @@ import {
   notifyCancelledStoreOrder,
   updateStoreOrder,
 } from "@/lib/store.functions";
+import { listRazorpayPaymentAttempts } from "@/lib/payments.functions";
 
 export const Route = createFileRoute("/seller")({
   ssr: false,
@@ -42,10 +43,23 @@ export const Route = createFileRoute("/seller")({
 
 const inr = (n: number) => `₹${n.toLocaleString("en-IN")}`;
 const ALL = [...STATUSES, "cancelled"] as string[];
+type CourierName = "Delhivery" | "Blue Dart" | "DTDC" | "India Post" | "Shiprocket" | "Other";
+const isCourier = (value: string): value is CourierName => Object.hasOwn(COURIERS, value);
+type RazorpayPaymentAttempt = {
+  id: string;
+  total: number;
+  status: string;
+  paymentId: string | null;
+  createdAt: string;
+  customerName: string;
+  customerMobile: string;
+};
 function SellerPage() {
   const { user, ready } = useCustomer();
   const [role, setRole] = useState<"loading" | "admin" | "none" | "taken" | "error">("loading");
   const [orders, setOrders] = useState<Order[]>([]);
+  const [razorpayAttempts, setRazorpayAttempts] = useState<RazorpayPaymentAttempt[]>([]);
+  const [razorpayAttemptsError, setRazorpayAttemptsError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
@@ -76,12 +90,29 @@ function SellerPage() {
   const load = useCallback(async () => {
     setRefreshing(true);
     try {
-      const rows = await listStoreOrders();
-      setOrders((rows as OrderRow[]).map(fromRow));
-      setErr("");
-    } catch (error) {
-      console.error("Could not load seller orders.", error);
-      setErr("Could not load orders. Please refresh and try again.");
+      try {
+        const rows = await listStoreOrders();
+        setOrders((rows as OrderRow[]).map(fromRow));
+        setErr("");
+      } catch (error) {
+        console.error("Could not load seller orders.", error);
+        setErr("Could not load orders. Please refresh and try again.");
+        return;
+      }
+
+      try {
+        const attempts = await listRazorpayPaymentAttempts();
+        setRazorpayAttempts(attempts);
+        setRazorpayAttemptsError("");
+      } catch (error) {
+        console.error("Could not load Razorpay payment attempts.", error);
+        setRazorpayAttempts([]);
+        setRazorpayAttemptsError(
+          error instanceof Error
+            ? error.message
+            : "Could not load Razorpay payment attempts. Please refresh and try again.",
+        );
+      }
     } finally {
       setRefreshing(false);
     }
@@ -205,6 +236,43 @@ function SellerPage() {
                 </div>
               ))}
             </div>
+            <section className="space-y-2">
+              <h2 className="text-lg font-semibold">Razorpay payments needing review</h2>
+              {razorpayAttemptsError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {razorpayAttemptsError}
+                </p>
+              ) : razorpayAttempts.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No pending payments need review.</p>
+              ) : (
+                razorpayAttempts.map((attempt) => (
+                  <article key={attempt.id} className="acc-card space-y-1">
+                    <div className="flex flex-wrap justify-between gap-2">
+                      <b>#{attempt.id}</b>
+                      <span className="text-sm font-medium">
+                        {attempt.status === "paid_review"
+                          ? "Paid — store review needed"
+                          : "Pending"}
+                      </span>
+                    </div>
+                    <p className="text-sm">
+                      {attempt.customerName}
+                      {attempt.customerMobile ? ` · ${attempt.customerMobile}` : ""}
+                      {" · "}
+                      <b>{inr(attempt.total)}</b>
+                    </p>
+                    {attempt.paymentId && (
+                      <p className="text-sm text-muted-foreground">
+                        Razorpay payment reference: {attempt.paymentId}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(attempt.createdAt).toLocaleString("en-IN")}
+                    </p>
+                  </article>
+                ))
+              )}
+            </section>
             <div className="flex flex-wrap gap-2">
               {["all", ...ALL].map((s) => (
                 <Button
@@ -267,6 +335,10 @@ function OrderCard({ order: o, onSaved }: { order: Order; onSaved: () => void })
           setMsg("This order is already cancelled.");
           return;
         }
+        if (o.payment === "razorpay") {
+          setMsg("Refund this Razorpay payment through the provider before cancelling the order.");
+          return;
+        }
         if (!confirm("Cancel this order? Stock will be returned.")) return;
         const { data, error } = await supabase.rpc("cancel_order", { _order_id: o.id });
         if (error) throw error;
@@ -297,7 +369,7 @@ function OrderCard({ order: o, onSaved }: { order: Order; onSaved: () => void })
           id: o.id,
           changes: {
             status: status as (typeof STATUSES)[number],
-            courier: courier ? (courier as keyof typeof COURIERS) : null,
+            courier: isCourier(courier) ? courier : null,
             awb: awb.trim() || null,
             tracking_url: url.trim() || null,
           },
@@ -337,10 +409,17 @@ function OrderCard({ order: o, onSaved }: { order: Order; onSaved: () => void })
         · <b>{inr(o.total)}</b> ·{" "}
         {o.payment === "cod"
           ? "Cash on delivery"
-          : o.payment === "upi"
-            ? "UPI (verified)"
-            : o.payment}
+          : o.payment === "razorpay"
+            ? "Razorpay payment verified"
+            : o.payment === "upi"
+              ? "UPI payment verified by store"
+              : "Paid online"}
       </p>
+      {o.payment === "razorpay" && o.paymentReference && (
+        <p className="text-sm text-muted-foreground">
+          Razorpay payment reference: {o.paymentReference}
+        </p>
+      )}
       {o.address && (
         <p className="text-sm text-muted-foreground">
           {o.address.name}, {o.address.address}, {o.address.city}, {o.address.state} —{" "}

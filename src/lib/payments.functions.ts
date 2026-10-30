@@ -1,15 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { createCodOrder as createCodOrderOnServer } from "@/lib/payment.server";
 import {
-  createCodOrder as createCodOrderOnServer,
-  createUpiPaymentRequest as createUpiPaymentRequestOnServer,
-  confirmUpiPaymentRequest as confirmUpiPaymentRequestOnServer,
-  getUpiPaymentRequestStatus,
-  listUpiPaymentRequests as listUpiPaymentRequestsOnServer,
-  rejectUpiPaymentRequest as rejectUpiPaymentRequestOnServer,
-  submitUpiPaymentReference,
-} from "@/lib/payment.server";
+  checkRazorpayPaymentStatus as checkRazorpayPaymentStatusOnServer,
+  createRazorpayPaymentOrder as createRazorpayPaymentOrderOnServer,
+  listRazorpayPaymentAttempts as listRazorpayPaymentAttemptsOnServer,
+  verifyRazorpayPayment as verifyRazorpayPaymentOnServer,
+} from "@/lib/razorpay.server";
 
 const lineSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,59}$/),
@@ -28,58 +26,6 @@ const addressSchema = z.object({
   type: z.string().max(30).optional(),
 });
 
-export const createUpiPaymentOrder = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .validator(
-    z.object({
-      items: z.array(lineSchema).min(1).max(4),
-      address: addressSchema,
-    }),
-  )
-  .handler(async ({ data, context }) =>
-    createUpiPaymentRequestOnServer(context.userId, data.items, data.address),
-  );
-
-export const submitUpiPayment = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .validator(
-    z.object({
-      requestId: z.string().regex(/^PF[A-F0-9]{20}$/),
-      paymentReference: z
-        .string()
-        .trim()
-        .min(6)
-        .max(50)
-        .regex(/^[A-Za-z0-9-]+$/),
-    }),
-  )
-  .handler(async ({ data, context }) =>
-    submitUpiPaymentReference(context.userId, data.requestId, data.paymentReference),
-  );
-
-export const getUpiPaymentStatus = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .validator(z.object({ requestId: z.string().regex(/^PF[A-F0-9]{20}$/) }))
-  .handler(async ({ data, context }) => getUpiPaymentRequestStatus(context.userId, data.requestId));
-
-export const listUpiPaymentRequests = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => listUpiPaymentRequestsOnServer(context.userId));
-
-export const confirmUpiPayment = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .validator(z.object({ requestId: z.string().regex(/^PF[A-F0-9]{20}$/) }))
-  .handler(async ({ data, context }) =>
-    confirmUpiPaymentRequestOnServer(context.userId, data.requestId),
-  );
-
-export const rejectUpiPayment = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .validator(z.object({ requestId: z.string().regex(/^PF[A-F0-9]{20}$/) }))
-  .handler(async ({ data, context }) =>
-    rejectUpiPaymentRequestOnServer(context.userId, data.requestId),
-  );
-
 export const createCodOrder = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator(
@@ -97,3 +43,57 @@ export const createCodOrder = createServerFn({ method: "POST" })
       typeof context.claims["email"] === "string" ? context.claims["email"] : null,
     ),
   );
+
+export const createRazorpayPaymentOrder = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      items: z.array(lineSchema).min(1).max(4),
+      address: addressSchema,
+      idempotencyKey: z.string().uuid(),
+      clearCart: z.boolean(),
+      paymentMethod: z.enum(["razorpay", "upi", "qr"]),
+    }),
+  )
+  .handler(async ({ data, context }) =>
+    createRazorpayPaymentOrderOnServer(
+      context.userId,
+      typeof context.claims["email"] === "string" ? context.claims["email"] : null,
+      data.items,
+      data.address,
+      data.idempotencyKey,
+      data.clearCart,
+      data.paymentMethod,
+    ),
+  );
+
+export const verifyRazorpayPayment = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(
+    z.object({
+      orderId: z.string().regex(/^PF[A-F0-9]{20}$/),
+      razorpayOrderId: z.string().min(1).max(64),
+      razorpayPaymentId: z.string().min(1).max(64),
+      razorpaySignature: z.string().regex(/^[a-f0-9]{64}$/i),
+    }),
+  )
+  .handler(async ({ data, context }) =>
+    verifyRazorpayPaymentOnServer(
+      context.userId,
+      data.orderId,
+      data.razorpayOrderId,
+      data.razorpayPaymentId,
+      data.razorpaySignature,
+    ),
+  );
+
+export const checkRazorpayPaymentStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(z.object({ orderId: z.string().regex(/^PF[A-F0-9]{20}$/) }))
+  .handler(async ({ data, context }) =>
+    checkRazorpayPaymentStatusOnServer(context.userId, data.orderId),
+  );
+
+export const listRazorpayPaymentAttempts = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => listRazorpayPaymentAttemptsOnServer(context.userId));

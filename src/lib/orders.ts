@@ -17,6 +17,7 @@ export type Order = {
   items: OrderLine[];
   total: number;
   payment: string;
+  paymentReference?: string | null;
   placedAt: string;
   address: OrderAddress;
   status?: string;
@@ -59,6 +60,7 @@ export type OrderRow = {
   items: unknown;
   total: number;
   payment: string;
+  payment_reference: string | null;
   created_at: string;
   address: unknown;
   status: string;
@@ -72,6 +74,7 @@ export const fromRow = (r: OrderRow): Order => ({
   items: r.items as OrderLine[],
   total: r.total,
   payment: r.payment,
+  paymentReference: r.payment_reference,
   placedAt: r.created_at,
   address: r.address as OrderAddress,
   status: r.status,

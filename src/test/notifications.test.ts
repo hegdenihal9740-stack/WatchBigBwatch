@@ -53,7 +53,7 @@ describe("order notifications", () => {
         total: 12800,
         items: [{ id: "steel-watch", qty: 2 }],
         status: "confirmed",
-        payment: "upi",
+        payment: "cod",
       },
       {
         name: STORE_CONTACT.name,
@@ -73,7 +73,7 @@ describe("order notifications", () => {
     expect(email.text).toContain("Customer: Customer");
     expect(email.text).toContain("Customer mobile: +91 9876543210");
     expect(email.text).toContain("Items: steel-watch x 2");
-    expect(email.text).toContain("Payment: UPI payment verified by the store");
+    expect(email.text).toContain("Payment: Cash on delivery");
   });
 
   it("reports missing Resend configuration without requiring SMS settings", async () => {

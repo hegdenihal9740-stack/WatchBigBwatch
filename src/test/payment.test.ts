@@ -1,8 +1,40 @@
 import { describe, expect, it } from "vitest";
+import { createHmac } from "node:crypto";
 import { getPaymentTotal } from "@/lib/payment";
-import { createUpiPaymentUri, UPI_PAYMENT_VPA } from "@/lib/upi";
+import {
+  verifyRazorpayCheckoutSignature,
+  verifyRazorpayWebhookSignature,
+} from "@/lib/razorpay-signature";
 
-describe("online payment totals", () => {
+describe("server order totals", () => {
+  it("verifies Razorpay checkout signatures against the exact order and payment IDs", () => {
+    const secret = "test-key-secret";
+    const orderId = "order_test_123";
+    const paymentId = "pay_test_456";
+    const signature = createHmac("sha256", secret).update(`${orderId}|${paymentId}`).digest("hex");
+
+    expect(verifyRazorpayCheckoutSignature(orderId, paymentId, signature, secret)).toBe(true);
+    expect(verifyRazorpayCheckoutSignature(orderId, paymentId, signature, "wrong-secret")).toBe(
+      false,
+    );
+    expect(verifyRazorpayCheckoutSignature("order_other", paymentId, signature, secret)).toBe(
+      false,
+    );
+    expect(verifyRazorpayCheckoutSignature(orderId, paymentId, "not-a-signature", secret)).toBe(
+      false,
+    );
+  });
+
+  it("verifies Razorpay webhook signatures over the unchanged raw body", () => {
+    const body = '{"event":"payment.captured"}';
+    const secret = "test-webhook-secret";
+    const signature = createHmac("sha256", secret).update(body).digest("hex");
+
+    expect(verifyRazorpayWebhookSignature(body, signature, secret)).toBe(true);
+    expect(verifyRazorpayWebhookSignature(`${body} `, signature, secret)).toBe(false);
+    expect(verifyRazorpayWebhookSignature(body, signature, "wrong-secret")).toBe(false);
+  });
+
   it("calculates INR totals from the trusted server catalog", () => {
     expect(
       getPaymentTotal([
@@ -10,36 +42,6 @@ describe("online payment totals", () => {
         { id: "gold", qty: 2 },
       ]),
     ).toBe(49800);
-  });
-
-  describe("direct UPI payment details", () => {
-    it("creates an order-specific INR payment URI for the configured payee", () => {
-      const uri = createUpiPaymentUri({
-        vpa: UPI_PAYMENT_VPA,
-        payeeName: "BIG-B",
-        amountRupees: 12800,
-        orderId: "PF0123456789ABCDEF0123",
-      });
-      const parsed = new URL(uri);
-
-      expect(parsed.protocol).toBe("upi:");
-      expect(parsed.hostname).toBe("pay");
-      expect(parsed.searchParams.get("pa")).toBe("nihalhegde550-1@oksbi");
-      expect(parsed.searchParams.get("am")).toBe("12800.00");
-      expect(parsed.searchParams.get("tr")).toBe("PF0123456789ABCDEF0123");
-      expect(parsed.searchParams.get("cu")).toBe("INR");
-    });
-
-    it("rejects invalid UPI payment totals", () => {
-      expect(() =>
-        createUpiPaymentUri({
-          vpa: UPI_PAYMENT_VPA,
-          payeeName: "BIG-B",
-          amountRupees: 0,
-          orderId: "PF0123456789ABCDEF0123",
-        }),
-      ).toThrow();
-    });
   });
 
   it("prices seller-added watches using server-provided catalog prices", () => {

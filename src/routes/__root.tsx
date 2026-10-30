@@ -78,7 +78,6 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
 }
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-  beforeLoad: async () => { await ensureProducts(); },
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -102,7 +101,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
         rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Karla:wght@400;500;600&family=Roboto:ital,wght@0,400;0,500;0,700;1,400&display=swap",
+        href: "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Karla:wght@400;500;600&display=swap",
       },
     ],
   }),
@@ -128,6 +127,12 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+
+  useEffect(() => {
+    void ensureProducts().catch((error: unknown) => {
+      console.error("Could not load the product catalog", error);
+    });
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

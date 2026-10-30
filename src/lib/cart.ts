@@ -1,9 +1,13 @@
 import { useSyncExternalStore } from "react";
-import { watchPrices } from "@/lib/watches";
+import { watches, watchPrices } from "@/lib/watches";
 import { isSupabaseConfigured } from "@/lib/supabase-config";
 
 export const prices = watchPrices as Record<string, number>;
 export type CartItem = { id: string; qty: number };
+export const getProductPrice = (id: string): number | undefined => {
+  const price = prices[id];
+  return typeof price === "number" && Number.isSafeInteger(price) && price > 0 ? price : undefined;
+};
 
 const BASE = "private-flight-cart";
 let userKey = "guest";
@@ -185,7 +189,9 @@ export function useCart() {
     items: list,
     open,
     count: list.reduce((s, i) => s + i.qty, 0),
-    total: list.reduce((s, i) => s + i.qty * prices[i.id], 0),
+    total: list.reduce((s, i) => s + i.qty * (getProductPrice(i.id) ?? 0), 0),
+    hasUnavailablePrice: list.some((i) => getProductPrice(i.id) === undefined),
+    hasUnavailableProduct: list.some((i) => !watches.some((watch) => watch.id === i.id)),
   };
 }
 

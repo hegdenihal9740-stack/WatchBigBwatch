@@ -1,11 +1,13 @@
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { ProductDetails } from "@/components/ProductDetails";
 import { ShopHeader } from "@/components/ShopHeader";
+import { ensureProducts } from "@/lib/products";
 import { watches, type WatchTone } from "@/lib/watches";
 
 export const Route = createFileRoute("/shop/$watchId")({
   ssr: false,
-  beforeLoad: ({ params }) => {
+  beforeLoad: async ({ params }) => {
+    await ensureProducts();
     if (!watches.some((w) => w.id === params.watchId)) throw notFound();
   },
   head: ({ params }) => {

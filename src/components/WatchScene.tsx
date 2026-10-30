@@ -37,7 +37,7 @@ export function WatchScene({ tone, moving = true, interactive = false, zoomable 
     onPointerDownCapture={event => { gesture.current = { x: event.clientX, y: event.clientY, dragged: false }; }}
     onPointerMoveCapture={event => { if (event.buttons && Math.hypot(event.clientX - gesture.current.x, event.clientY - gesture.current.y) > 5) gesture.current.dragged = true; }}
     onClickCapture={event => { if (gesture.current.dragged) { event.preventDefault(); event.stopPropagation(); } }}>
-    {mounted && visible && <Canvas dpr={[1, 1.5]} camera={{ position: [0, 0, 8.6], fov: 42 }} gl={{ antialias: true, alpha: true }}>
+    {mounted && visible && <Canvas onCreated={({ gl }) => { gl.debug.checkShaderErrors = false; }} frameloop={moving && !reducedMotion ? 'always' : 'demand'} dpr={[1, 1.5]} camera={{ position: [0, 0, 8.6], fov: 42 }} gl={{ antialias: true, alpha: true }}>
       <ambientLight intensity={.8} />
       <directionalLight position={[3, 5, 6]} intensity={3} />
       <directionalLight position={[-4, -1, 3]} intensity={1.6} />

@@ -17,7 +17,7 @@ import {
 import { ShopHeader } from "@/components/ShopHeader";
 import { AuthLink } from "@/components/AuthLink";
 import { useCustomer } from "@/components/CustomerAccounts";
-import { cart, prices } from "@/lib/cart";
+import { cart, getProductPrice } from "@/lib/cart";
 import { useWishlist, wishlist } from "@/lib/wishlist";
 import { watches } from "@/lib/watches";
 import { loadOrders, orderStatus, trackingLink, type Order } from "@/lib/orders";
@@ -371,9 +371,17 @@ function AccountPage() {
                                 ? "Cash on delivery"
                                 : o.payment === "upi"
                                   ? "UPI payment verified by store"
-                                  : o.payment}
+                                  : o.payment === "razorpay"
+                                    ? "Razorpay payment verified"
+                                    : o.payment}
                             </dd>
                           </div>
+                          {o.payment === "razorpay" && o.paymentReference && (
+                            <div>
+                              <dt>Razorpay payment reference</dt>
+                              <dd>{o.paymentReference}</dd>
+                            </div>
+                          )}
                         </dl>
                         <div className="trk-actions">
                           <Link
@@ -386,33 +394,40 @@ function AccountPage() {
                         </div>
                       </div>
                     )}
-                    {!cancelled && index <= 1 && (
-                      <button
-                        type="button"
-                        className="co-change text-destructive"
-                        onClick={async () => {
-                          if (!confirm("Cancel this order?")) return;
-                          try {
-                            const { data, error } = await supabase.rpc("cancel_order", {
-                              _order_id: o.id,
-                            });
-                            if (error) throw error;
-                            if (!data) {
-                              alert("This order can no longer be cancelled.");
-                              return;
+                    {!cancelled &&
+                      index <= 1 &&
+                      (o.payment === "razorpay" ? (
+                        <p className="trk-hint">
+                          For cancellation or refund requests for this Razorpay payment,{" "}
+                          <Link to="/contact">contact BIG-B support</Link>.
+                        </p>
+                      ) : (
+                        <button
+                          type="button"
+                          className="co-change text-destructive"
+                          onClick={async () => {
+                            if (!confirm("Cancel this order?")) return;
+                            try {
+                              const { data, error } = await supabase.rpc("cancel_order", {
+                                _order_id: o.id,
+                              });
+                              if (error) throw error;
+                              if (!data) {
+                                alert("This order can no longer be cancelled.");
+                                return;
+                              }
+                              setOrders((all) =>
+                                all.map((x) => (x.id === o.id ? { ...x, status: "cancelled" } : x)),
+                              );
+                            } catch (error) {
+                              console.error("Could not cancel order.", error);
+                              alert("Could not cancel this order. Please try again.");
                             }
-                            setOrders((all) =>
-                              all.map((x) => (x.id === o.id ? { ...x, status: "cancelled" } : x)),
-                            );
-                          } catch (error) {
-                            console.error("Could not cancel order.", error);
-                            alert("Could not cancel this order. Please try again.");
-                          }
-                        }}
-                      >
-                        Cancel order
-                      </button>
-                    )}
+                          }}
+                        >
+                          Cancel order
+                        </button>
+                      ))}
                   </article>
                 );
               })
@@ -430,7 +445,8 @@ function AccountPage() {
               </p>
             ) : (
               wish.map((id) => {
-                const w = watches.find((x) => x.id === id)!;
+                const w = watches.find((x) => x.id === id);
+                if (!w) return null;
                 return (
                   <article key={id} className="acc-card acc-order">
                     <div className="acc-order-row">
@@ -439,7 +455,11 @@ function AccountPage() {
                       </Link>
                       <div>
                         <p className="acc-order-name">{w.name}</p>
-                        <p className="product-price">{usd(prices[id])}</p>
+                        <p className="product-price">
+                          {getProductPrice(id) === undefined
+                            ? "Price unavailable"
+                            : usd(getProductPrice(id)!)}
+                        </p>
                         <button
                           type="button"
                           className="product-cart acc-move"

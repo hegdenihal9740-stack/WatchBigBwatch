@@ -79,7 +79,6 @@ function orderDetails(
 
 function paymentLabel(payment: string) {
   if (payment === "cod") return "Cash on delivery";
-  if (payment === "upi") return "UPI payment verified by the store";
   return "Paid online";
 }
 
