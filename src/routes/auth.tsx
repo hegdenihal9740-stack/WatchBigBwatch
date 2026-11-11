@@ -13,6 +13,7 @@ import {
   getPostAuthPath,
   readLastVisitedPath,
   readBrowserOAuthReturnPath,
+  savePasswordRecoveryRequest,
   saveBrowserOAuthReturnPath,
 } from "@/lib/auth-redirect";
 
@@ -113,6 +114,11 @@ function AuthPage() {
       } else if (mode === "register") {
         const callbackUrl = new URL(createAuthCallbackUrl(window.location.origin, returnPath));
         callbackUrl.searchParams.set("confirmed", "1");
+        try {
+          saveBrowserOAuthReturnPath(returnPath);
+        } catch (storageError) {
+          console.error("[Auth] Could not store registration return path", storageError);
+        }
         const { data, error } = await supabase.auth.signUp({
           email: normalizedEmail,
           password,
@@ -126,17 +132,24 @@ function AuthPage() {
           setMode("login");
           return;
         }
+        if (data.session) {
+          window.location.replace(returnPath);
+          return;
+        }
         setConfirmationPending(!data.session);
         setMessage(
-          data.session
-            ? "Your account is ready."
-            : `Check ${normalizedEmail} and open the confirmation link. You’ll return here and be signed in.`,
+          `Check ${normalizedEmail} and open the confirmation link. You’ll return here and be signed in.`,
         );
       } else if (mode === "forgot") {
         const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
           redirectTo: new URL("/reset-password", window.location.origin).toString(),
         });
         if (error) throw error;
+        try {
+          savePasswordRecoveryRequest(localStorage);
+        } catch (error) {
+          console.error("[Auth] Could not store password recovery state", error);
+        }
         setMessage("If an account exists, a password reset link has been sent.");
       } else {
         const { error } = await supabase.auth.signInWithPassword({

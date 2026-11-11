@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Minus, Plus, Trash2 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -14,6 +15,33 @@ import { Button } from "@/components/ui/button";
 export function CartDrawer() {
   const { items, open, total, count, hasUnavailablePrice, hasUnavailableProduct } = useCart();
   const navigate = useNavigate();
+  const [catalogState, setCatalogState] = useState<"idle" | "loading" | "error">("idle");
+  const [catalogRetry, setCatalogRetry] = useState(0);
+  const hasItems = items.length > 0;
+
+  useEffect(() => {
+    if (!open || !hasItems) {
+      setCatalogState("idle");
+      return;
+    }
+
+    let cancelled = false;
+    setCatalogState("loading");
+    void import("@/lib/products")
+      .then(({ ensureProducts }) => ensureProducts(catalogRetry > 0))
+      .then((loaded) => {
+        if (!cancelled) setCatalogState(loaded ? "idle" : "error");
+      })
+      .catch((error: unknown) => {
+        console.error("[Products] Could not load cart items", error);
+        if (!cancelled) setCatalogState("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [catalogRetry, hasItems, open]);
+
   return (
     <>
       <Sheet open={open} onOpenChange={cart.setOpen}>
@@ -22,7 +50,11 @@ export function CartDrawer() {
             <SheetTitle className="cart-title">Your cart</SheetTitle>
             <SheetDescription>Free insured delivery · 7 days replacement</SheetDescription>
           </SheetHeader>
-          {items.length === 0 ? (
+          {catalogState === "loading" ? (
+            <p className="cart-empty" role="status">
+              Loading your cart…
+            </p>
+          ) : items.length === 0 ? (
             <p className="cart-empty">Your cart is empty. Add a timepiece from the collection.</p>
           ) : (
             <ul className="cart-list">
@@ -69,6 +101,14 @@ export function CartDrawer() {
                 );
               })}
             </ul>
+          )}
+          {catalogState === "error" && (
+            <p role="alert">
+              Product details could not be refreshed. Prices may be out of date.{" "}
+              <button type="button" onClick={() => setCatalogRetry((retry) => retry + 1)}>
+                Try again
+              </button>
+            </p>
           )}
           {items.length > 0 && (
             <div className="cart-footer">

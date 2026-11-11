@@ -4870,6 +4870,60 @@ body {
   border-color: oklch(0.86 0.1 85);
 }
 
+.shop-desktop-cart,
+.shop-account-link {
+  display: none;
+}
+
+.shop-cart-badge {
+  position: absolute;
+  top: -0.45rem;
+  right: -0.45rem;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.2rem;
+  border-radius: 999px;
+  background: var(--product-gold);
+  color: var(--product-bg);
+  font-size: 0.65rem;
+  display: grid;
+  place-items: center;
+}
+
+@media (min-width: 769px) {
+  .shop-page {
+    padding-bottom: 0;
+  }
+
+  .shop-page .bnav {
+    display: none;
+  }
+
+  .shop-desktop-cart,
+  .shop-account-link {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--product-gold);
+    color: var(--product-gold);
+    background: transparent;
+    white-space: nowrap;
+    text-decoration: none;
+  }
+
+  .shop-desktop-cart {
+    cursor: pointer;
+  }
+
+  .shop-desktop-cart:hover,
+  .shop-account-link:hover {
+    background: var(--product-gold);
+    color: var(--product-bg);
+  }
+}
+
 /* ===== Dark checkout page ===== */
 .shop-page.co-checkout-page {
   --background: #000;

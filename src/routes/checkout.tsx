@@ -20,6 +20,7 @@ import {
   checkRazorpayPaymentStatus,
   createCodOrder,
   createRazorpayPaymentOrder,
+  resumeRazorpayPaymentOrder,
   verifyRazorpayPayment,
 } from "@/lib/payments.functions";
 import { watches, type WatchTone } from "@/lib/watches";
@@ -59,6 +60,22 @@ const EMPTY: Address = {
 const KEY = "private-flight-address";
 const usd = (n: number) => `₹${n.toLocaleString("en-IN")}`;
 const razorpayPendingKey = (userId: string) => `razorpay-pending-order:${userId}`;
+const razorpayDismissedPendingKey = (userId: string) =>
+  `razorpay-dismissed-pending-order:${userId}`;
+type PendingRazorpayOrder = Extract<
+  Awaited<ReturnType<typeof createRazorpayPaymentOrder>>,
+  { status: "pending" }
+>;
+type RazorpayCheckoutOrder = PendingRazorpayOrder;
+type CheckoutPaymentMethod = "cod" | "razorpay";
+type CheckoutLine = { id: string; qty: number };
+
+function checkoutItemsKey(items: CheckoutLine[]) {
+  return [...items]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map(({ id, qty }) => `${id}:${qty}`)
+    .join("|");
+}
 
 type RazorpayCheckoutResponse = {
   razorpay_order_id: string;
@@ -75,7 +92,11 @@ type RazorpayCheckoutOptions = {
   order_id: string;
   prefill: { name: string; contact: string; email?: string };
   notes: { bigb_order_id: string };
-  method?: { upi: boolean };
+  config: {
+    display: {
+      hide: { method: "upi"; flows: ["collect"] }[];
+    };
+  };
   theme: { color: string };
   handler: (response: RazorpayCheckoutResponse) => void | Promise<void>;
   modal: { ondismiss: () => void };
@@ -199,15 +220,16 @@ function Checkout() {
   } | null>(null);
   const [busy, setBusy] = useState(false);
   const [checkingPayment, setCheckingPayment] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<"cod" | "razorpay" | "upi" | "qr">("cod");
+  const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>("cod");
   const [paymentAttempt, setPaymentAttempt] = useState<{
     orderId: string;
     total: number;
     count: number;
-    paymentMethod: "razorpay" | "upi" | "qr";
+    items: CheckoutLine[];
+    paymentMethod: "razorpay";
     status: "pending" | "failed" | "paid_review";
   } | null>(null);
-  const [qrCode, setQrCode] = useState<{ imageUrl: string; expiresAt: number } | null>(null);
+  const [dismissedPendingOrderId, setDismissedPendingOrderId] = useState<string | null>(null);
   const paymentBusyRef = useRef(false);
   const idempotencyKeyRef = useRef<string | null>(null);
   const [locationBusy, setLocationBusy] = useState(false);
@@ -215,6 +237,11 @@ function Checkout() {
   const { user, ready } = useCustomer();
   const stock = useStock();
   const [codOk, setCodOk] = useState(false);
+  const activeItemsKey = checkoutItemsKey(lines);
+  const activePaymentAttempt =
+    paymentAttempt && checkoutItemsKey(paymentAttempt.items) === activeItemsKey
+      ? paymentAttempt
+      : null;
   const short = stock ? lines.filter((l) => (stock[l.id] ?? 0) < l.qty) : [];
   useEffect(() => {
     try {
@@ -321,52 +348,72 @@ function Checkout() {
   }, 0);
   const totalLabel = hasUnavailableProduct || hasUnavailablePrice ? "Unavailable" : usd(total);
   const applyRazorpayPaymentStatus = useCallback(
-    (result: {
-      orderId: string;
-      total: number;
-      count: number;
-      clearCart: boolean;
-      paymentMethod: "razorpay" | "upi" | "qr";
-      qrCode?: { imageUrl: string; expiresAt: number };
-      status: string;
-    }) => {
+    (
+      result: {
+        orderId: string;
+        total: number;
+        count: number;
+        clearCart: boolean;
+        paymentMethod: "razorpay";
+        status: string;
+      },
+      showPendingMessage = true,
+    ) => {
       if (result.status === "paid") {
         if (result.clearCart) cart.clear();
         try {
-          if (user && localStorage.getItem(razorpayPendingKey(user.id)) === result.orderId) {
-            localStorage.removeItem(razorpayPendingKey(user.id));
+          if (user) {
+            if (localStorage.getItem(razorpayPendingKey(user.id)) === result.orderId) {
+              localStorage.removeItem(razorpayPendingKey(user.id));
+            }
+            if (localStorage.getItem(razorpayDismissedPendingKey(user.id)) === result.orderId) {
+              localStorage.removeItem(razorpayDismissedPendingKey(user.id));
+            }
           }
         } catch (error) {
           console.error("[Razorpay] Could not clear local payment recovery ID", error);
         }
         setPaymentAttempt(null);
-        setQrCode(null);
+        setDismissedPendingOrderId(null);
         setPlaced({
           id: result.orderId,
           total: result.total,
           count: result.count,
           payment: "razorpay",
         });
-        setPaymentMethod(result.paymentMethod);
         idempotencyKeyRef.current = null;
         toast.success("Payment verified and order confirmed.");
       } else if (result.status === "failed") {
+        let isDismissed = false;
         try {
-          if (user && localStorage.getItem(razorpayPendingKey(user.id)) === result.orderId) {
-            localStorage.removeItem(razorpayPendingKey(user.id));
+          if (user) {
+            isDismissed =
+              localStorage.getItem(razorpayDismissedPendingKey(user.id)) === result.orderId;
+            if (localStorage.getItem(razorpayPendingKey(user.id)) === result.orderId) {
+              localStorage.removeItem(razorpayPendingKey(user.id));
+            }
+            if (isDismissed) {
+              localStorage.removeItem(razorpayDismissedPendingKey(user.id));
+            }
           }
         } catch (error) {
           console.error("[Razorpay] Could not clear local payment recovery ID", error);
+        }
+        if (isDismissed) {
+          setPaymentAttempt(null);
+          setDismissedPendingOrderId(null);
+          idempotencyKeyRef.current = null;
+          return;
         }
         setPaymentAttempt({
           orderId: result.orderId,
           total: result.total,
           count: result.count,
+          items: result.items,
           paymentMethod: result.paymentMethod,
           status: "failed",
         });
-        setQrCode(null);
-        setPaymentMethod(result.paymentMethod);
+        setDismissedPendingOrderId(null);
         idempotencyKeyRef.current = null;
         toast.error("Payment failed. Your cart is unchanged; you can safely retry.");
       } else if (result.status === "paid_review") {
@@ -374,26 +421,35 @@ function Checkout() {
           orderId: result.orderId,
           total: result.total,
           count: result.count,
+          items: result.items,
           paymentMethod: result.paymentMethod,
           status: "paid_review",
         });
-        setQrCode(null);
-        setPaymentMethod(result.paymentMethod);
         toast.warning(
           "Payment was received, but stock needs store review. Do not pay again; contact BIG-B.",
           { duration: 12000 },
         );
       } else {
+        let isDismissed = false;
+        try {
+          isDismissed =
+            user !== null &&
+            localStorage.getItem(razorpayDismissedPendingKey(user.id)) === result.orderId;
+        } catch (error) {
+          console.error("[Razorpay] Could not read dismissed pending notice", error);
+        }
         setPaymentAttempt({
           orderId: result.orderId,
           total: result.total,
           count: result.count,
+          items: result.items,
           paymentMethod: result.paymentMethod,
           status: "pending",
         });
-        setPaymentMethod(result.paymentMethod);
-        setQrCode("qrCode" in result ? (result.qrCode ?? null) : null);
-        toast.info("Payment is still processing. Check the status before trying again.");
+        setDismissedPendingOrderId(isDismissed ? result.orderId : null);
+        if (showPendingMessage && !isDismissed) {
+          toast.info("Payment is still processing. Check the status before trying again.");
+        }
       }
     },
     [user],
@@ -418,12 +474,110 @@ function Checkout() {
     try {
       const orderId = localStorage.getItem(razorpayPendingKey(user.id));
       if (orderId && /^PF[A-F0-9]{20}$/.test(orderId)) {
-        void refreshRazorpayPayment(orderId);
+        void checkRazorpayPaymentStatus({ data: { orderId } })
+          .then((result) => {
+            if (checkoutItemsKey(result.items) === activeItemsKey) {
+              applyRazorpayPaymentStatus(result);
+              return;
+            }
+            if (result.status !== "pending") {
+              if (localStorage.getItem(razorpayPendingKey(user.id)) === orderId) {
+                localStorage.removeItem(razorpayPendingKey(user.id));
+              }
+              if (localStorage.getItem(razorpayDismissedPendingKey(user.id)) === orderId) {
+                localStorage.removeItem(razorpayDismissedPendingKey(user.id));
+              }
+            }
+          })
+          .catch((error: unknown) => {
+            console.error("[Razorpay] Could not restore payment status", error);
+          });
       }
     } catch (error) {
       console.error("[Razorpay] Could not read local payment recovery ID", error);
     }
-  }, [ready, refreshRazorpayPayment, user]);
+  }, [activeItemsKey, applyRazorpayPaymentStatus, ready, user]);
+
+  const launchRazorpayCheckout = async (order: RazorpayCheckoutOrder) => {
+    try {
+      if (user) localStorage.setItem(razorpayPendingKey(user.id), order.orderId);
+    } catch (error) {
+      console.error("[Razorpay] Could not store payment recovery ID", error);
+    }
+    setPaymentAttempt({
+      orderId: order.orderId,
+      total: order.total,
+      count: order.count,
+      items: order.items,
+      paymentMethod: order.paymentMethod,
+      status: "pending",
+    });
+    await loadRazorpaySdk();
+    const Razorpay = window.Razorpay;
+    if (!Razorpay) throw new Error("Razorpay checkout did not initialize. Please reload.");
+
+    const releasePaymentLock = () => {
+      paymentBusyRef.current = false;
+      setBusy(false);
+    };
+    const refreshCheckoutAfterDismissal = () => {
+      try {
+        if (user) {
+          localStorage.setItem(razorpayDismissedPendingKey(user.id), order.orderId);
+        }
+      } catch (error) {
+        console.error("[Razorpay] Could not save checkout dismissal state", error);
+        toast.error("Could not refresh checkout safely. Check your payment status before retrying.");
+        releasePaymentLock();
+        return;
+      }
+      releasePaymentLock();
+      window.location.reload();
+    };
+    const checkout = new Razorpay({
+      key: order.keyId,
+      amount: order.amount,
+      currency: order.currency,
+      name: "BIG-B Watches",
+      description: `Order ${order.orderId}`,
+      order_id: order.razorpayOrderId,
+      prefill: {
+        name: order.name,
+        contact: order.mobile,
+        ...(order.email ? { email: order.email } : {}),
+      },
+      notes: { bigb_order_id: order.orderId },
+      config: {
+        display: {
+          hide: [{ method: "upi", flows: ["collect"] }],
+        },
+      },
+      theme: { color: "#111827" },
+      handler: async (response) => {
+        try {
+          const result = await verifyRazorpayPayment({
+            data: {
+              orderId: order.orderId,
+              razorpayOrderId: response.razorpay_order_id,
+              razorpayPaymentId: response.razorpay_payment_id,
+              razorpaySignature: response.razorpay_signature,
+            },
+          });
+          applyRazorpayPaymentStatus(result);
+        } catch (error) {
+          console.error("[Razorpay] Could not verify checkout response", error);
+          toast.error(
+            "Payment verification is taking longer than expected. Check payment status before retrying.",
+          );
+        } finally {
+          releasePaymentLock();
+        }
+      },
+      modal: { ondismiss: refreshCheckoutAfterDismissal },
+    });
+    checkout.on("payment.failed", refreshCheckoutAfterDismissal);
+    checkout.open();
+  };
 
   const startRazorpayCheckout = async () => {
     if (paymentBusyRef.current) return;
@@ -438,96 +592,40 @@ function Checkout() {
           address: a,
           idempotencyKey,
           clearCart: fromCart,
-          paymentMethod,
         },
       });
-      try {
-        if (user) localStorage.setItem(razorpayPendingKey(user.id), order.orderId);
-      } catch (error) {
-        console.error("[Razorpay] Could not store payment recovery ID", error);
-      }
-      setPaymentAttempt({
-        orderId: order.orderId,
-        total: order.total,
-        count: order.count,
-        paymentMethod: order.paymentMethod,
-        status: "pending",
-      });
-      setPaymentMethod(order.paymentMethod);
-      if (paymentMethod === "qr") {
-        if (order.status !== "pending") {
-          applyRazorpayPaymentStatus(order);
-          paymentBusyRef.current = false;
-          setBusy(false);
-          return;
-        }
-        if (!("qrCode" in order) || !order.qrCode) {
-          throw new Error("Razorpay did not return a QR code. Check payment status before retrying.");
-        }
-        setQrCode(order.qrCode);
+      if (order.status !== "pending") {
+        applyRazorpayPaymentStatus(order);
         paymentBusyRef.current = false;
         setBusy(false);
-        toast.success("Your UPI QR code is ready. Scan it to complete payment.");
         return;
       }
-      setQrCode(null);
-      await loadRazorpaySdk();
-      const Razorpay = window.Razorpay;
-      if (!Razorpay) throw new Error("Razorpay checkout did not initialize. Please reload.");
-
-      const releasePaymentLock = () => {
-        paymentBusyRef.current = false;
-        setBusy(false);
-      };
-      const checkAfterDismissal = () => {
-        toast.info("Checkout closed. We are checking whether your payment completed.");
-        releasePaymentLock();
-        void refreshRazorpayPayment(order.orderId);
-      };
-      const checkout = new Razorpay({
-        key: order.keyId,
-        amount: order.amount,
-        currency: order.currency,
-        name: "BIG-B Watches",
-        description: `Order ${order.orderId}`,
-        order_id: order.razorpayOrderId,
-        prefill: {
-          name: order.name,
-          contact: order.mobile,
-          ...(order.email ? { email: order.email } : {}),
-        },
-        notes: { bigb_order_id: order.orderId },
-        ...(paymentMethod === "upi" ? { method: { upi: true } } : {}),
-        theme: { color: "#111827" },
-        handler: async (response) => {
-          try {
-            const result = await verifyRazorpayPayment({
-              data: {
-                orderId: order.orderId,
-                razorpayOrderId: response.razorpay_order_id,
-                razorpayPaymentId: response.razorpay_payment_id,
-                razorpaySignature: response.razorpay_signature,
-              },
-            });
-            applyRazorpayPaymentStatus(result);
-          } catch (error) {
-            console.error("[Razorpay] Could not verify checkout response", error);
-            toast.error(
-              "Payment verification is taking longer than expected. Check payment status before retrying.",
-            );
-          } finally {
-            releasePaymentLock();
-          }
-        },
-        modal: { ondismiss: checkAfterDismissal },
-      });
-      checkout.on("payment.failed", checkAfterDismissal);
-      checkout.open();
+      await launchRazorpayCheckout(order);
     } catch (error) {
       idempotencyKeyRef.current = null;
       paymentBusyRef.current = false;
       setBusy(false);
       throw error;
+    }
+  };
+
+  const resumePendingRazorpayCheckout = async (orderId: string) => {
+    if (paymentBusyRef.current) return;
+    paymentBusyRef.current = true;
+    setBusy(true);
+    try {
+      const order = await resumeRazorpayPaymentOrder({ data: { orderId } });
+      if (order.status !== "pending") {
+        applyRazorpayPaymentStatus(order);
+        paymentBusyRef.current = false;
+        setBusy(false);
+        return;
+      }
+      await launchRazorpayCheckout(order);
+    } catch (error) {
+      paymentBusyRef.current = false;
+      setBusy(false);
+      toast.error(error instanceof Error ? error.message : "Could not reopen Razorpay Checkout.");
     }
   };
 
@@ -550,11 +648,24 @@ function Checkout() {
       toast.error("Some watches are out of stock — reduce the quantity");
       return;
     }
-    if (paymentAttempt?.status === "pending") {
-      toast.error("Check the existing Razorpay payment status before starting another order.");
-      return;
+    if (activePaymentAttempt?.status === "pending") {
+      if (paymentMethod === "razorpay") {
+        await resumePendingRazorpayCheckout(activePaymentAttempt.orderId);
+        return;
+      }
+      if (dismissedPendingOrderId !== activePaymentAttempt.orderId) {
+        toast.error("A UPI payment is still pending. Check its status before placing a COD order.");
+        return;
+      }
+      if (
+        !window.confirm(
+          "Razorpay has not confirmed that the UPI payment failed. If you continue with COD and the UPI payment later succeeds, you may be charged for both orders. Continue with COD?",
+        )
+      ) {
+        return;
+      }
     }
-    if (paymentAttempt?.status === "paid_review") {
+    if (activePaymentAttempt?.status === "paid_review") {
       toast.error("Your payment is under store review. Contact BIG-B before paying again.");
       return;
     }
@@ -562,7 +673,7 @@ function Checkout() {
       toast.error("Please confirm you will answer our confirmation call");
       return;
     }
-    if (paymentMethod !== "cod") {
+    if (paymentMethod === "razorpay") {
       try {
         await startRazorpayCheckout();
       } catch (error) {
@@ -588,7 +699,7 @@ function Checkout() {
     }
   };
 
-  if (!placed && !paymentAttempt && lines.length === 0)
+  if (!placed && !activePaymentAttempt && lines.length === 0)
     return (
       <main className="shop-page co-checkout-page">
         <ShopHeader />
@@ -800,33 +911,13 @@ function Checkout() {
                     checked={paymentMethod === "razorpay"}
                     onChange={() => setPaymentMethod("razorpay")}
                   />{" "}
-                  Cards, netbanking and other Razorpay methods
+                  Pay with UPI via Razorpay
                 </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="payment-method"
-                    checked={paymentMethod === "upi"}
-                    onChange={() => setPaymentMethod("upi")}
-                  />{" "}
-                  Pay with a UPI app
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="payment-method"
-                    checked={paymentMethod === "qr"}
-                    onChange={() => setPaymentMethod("qr")}
-                  />{" "}
-                  Scan a UPI QR code
-                </label>
-                {paymentMethod !== "cod" ? (
+                {paymentMethod === "razorpay" ? (
                   <p className="text-sm text-muted-foreground" role="note">
-                    {paymentMethod === "qr"
-                      ? "We will create a single-use QR for this exact order total. Scan it with any UPI app; your order is confirmed only after server verification."
-                      : paymentMethod === "upi"
-                        ? "Razorpay Checkout will open the available UPI apps (and may show a QR on desktop). Your order is confirmed only after server verification."
-                        : "Complete payment in Razorpay Checkout. Your order is confirmed only after the payment is verified by our server."}
+                    Use a UPI app on mobile or scan the UPI QR code on desktop. Entering a UPI ID
+                    is unavailable under current UPI rules. Available options depend on your device
+                    and Razorpay account. Your order is confirmed only after payment verification.
                   </p>
                 ) : (
                   <label>
@@ -838,61 +929,80 @@ function Checkout() {
                     I will answer a confirmation call on {a.mobile} before dispatch
                   </label>
                 )}
-                {paymentAttempt && (
+                {activePaymentAttempt &&
+                  !(
+                    activePaymentAttempt.status === "pending" &&
+                    dismissedPendingOrderId === activePaymentAttempt.orderId
+                  ) && (
                   <div className="space-y-2" role="status">
                     <p>
-                      Razorpay payment for order <b>{paymentAttempt.orderId}</b>:{" "}
+                      Razorpay payment for order <b>{activePaymentAttempt.orderId}</b>:{" "}
                       <b>
-                        {paymentAttempt.status === "paid_review"
+                        {activePaymentAttempt.status === "paid_review"
                           ? "Paid — store review needed"
-                          : paymentAttempt.status.charAt(0).toUpperCase() +
-                            paymentAttempt.status.slice(1)}
+                          : activePaymentAttempt.status.charAt(0).toUpperCase() +
+                            activePaymentAttempt.status.slice(1)}
                       </b>
                     </p>
-                    {paymentAttempt.status === "pending" && (
-                      <>
-                        {paymentAttempt.paymentMethod === "qr" && qrCode && (
-                          <div className="space-y-2 text-center">
-                            <img
-                              className="mx-auto h-56 w-56 rounded bg-white p-2"
-                              src={qrCode.imageUrl}
-                              alt={`UPI payment QR code for ${usd(paymentAttempt.total)}`}
-                            />
-                            <a
-                              className="co-change"
-                              href={qrCode.imageUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              Open or download the QR code
-                            </a>
-                            <p className="text-sm text-muted-foreground">
-                              Expires {new Date(qrCode.expiresAt).toLocaleString()}. After paying,
-                              check the payment status below.
-                            </p>
-                          </div>
-                        )}
+                    {activePaymentAttempt.status === "pending" && (
+                      <div className="flex flex-wrap gap-3">
                         <button
                           type="button"
                           className="co-change"
-                          onClick={() => void refreshRazorpayPayment(paymentAttempt.orderId)}
+                          onClick={() => void refreshRazorpayPayment(activePaymentAttempt.orderId)}
                           disabled={checkingPayment}
                         >
                           {checkingPayment ? "Checking…" : "Check payment status"}
                         </button>
-                      </>
+                        <button
+                          type="button"
+                          className="co-change"
+                          onClick={() => void resumePendingRazorpayCheckout(activePaymentAttempt.orderId)}
+                          disabled={busy || checkingPayment}
+                        >
+                          {busy ? "Opening…" : "Continue payment"}
+                        </button>
+                        <button
+                          type="button"
+                          className="co-change"
+                          onClick={() => {
+                            if (!user) return;
+                            try {
+                              localStorage.setItem(
+                                razorpayDismissedPendingKey(user.id),
+                                activePaymentAttempt.orderId,
+                              );
+                              setDismissedPendingOrderId(activePaymentAttempt.orderId);
+                            } catch (error) {
+                              console.error("[Razorpay] Could not hide pending notice", error);
+                              toast.error("Could not hide the pending notice. Please try again.");
+                            }
+                          }}
+                        >
+                          Hide pending notice
+                        </button>
+                      </div>
                     )}
-                    {paymentAttempt.status === "failed" && (
+                    {activePaymentAttempt.status === "failed" && (
                       <p className="text-sm text-muted-foreground">
-                        Your cart is unchanged. Choose Razorpay and retry safely.
+                        Your cart is unchanged. Choose a payment method and retry safely.
                       </p>
                     )}
-                    {paymentAttempt.status === "paid_review" && (
+                    {activePaymentAttempt.status === "paid_review" && (
                       <p className="text-sm text-muted-foreground">
                         Do not pay again. Contact BIG-B support to complete your order.
                       </p>
                     )}
                   </div>
+                )}
+                {activePaymentAttempt?.status === "pending" &&
+                  paymentMethod === "cod" &&
+                  (
+                  <p className="text-sm text-muted-foreground" role="alert">
+                    {dismissedPendingOrderId === activePaymentAttempt.orderId
+                      ? "Razorpay has not confirmed that the UPI payment failed. You can continue with COD, but the UPI payment could still complete and charge you."
+                      : "A UPI payment is still pending. Check its status before placing a COD order to avoid duplicate orders."}
+                  </p>
                 )}
                 {ready && !user && (
                   <p className="product-pin-msg is-err">
@@ -991,20 +1101,24 @@ function Checkout() {
                   hasUnavailablePrice ||
                   short.length > 0 ||
                   (paymentMethod === "cod" && !codOk) ||
-                  paymentAttempt?.status === "pending" ||
-                  paymentAttempt?.status === "paid_review"
+                  (paymentMethod === "cod" &&
+                    activePaymentAttempt?.status === "pending" &&
+                    dismissedPendingOrderId !== activePaymentAttempt.orderId) ||
+                  activePaymentAttempt?.status === "paid_review"
                 }
                 onClick={() => void placeOrder()}
               >
                 {busy
                   ? "Please wait…"
-                  : paymentMethod === "qr"
-                    ? `Generate UPI QR · ${totalLabel}`
-                    : paymentMethod === "upi"
+                  : activePaymentAttempt?.status === "pending"
+                    ? paymentMethod === "razorpay"
+                      ? `Continue UPI payment · ${totalLabel}`
+                      : dismissedPendingOrderId === activePaymentAttempt.orderId
+                        ? `Place COD order · ${totalLabel}`
+                        : `COD unavailable · ${totalLabel}`
+                    : paymentMethod === "razorpay"
                       ? `Pay with UPI · ${totalLabel}`
-                      : paymentMethod === "razorpay"
-                        ? `Pay online · ${totalLabel}`
-                        : `Place COD order · ${totalLabel}`}
+                      : `Place COD order · ${totalLabel}`}
               </button>
             )}
             <ul className="co-badges">

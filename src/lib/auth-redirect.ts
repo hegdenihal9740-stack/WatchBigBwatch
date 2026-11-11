@@ -2,7 +2,9 @@ const APP_ORIGIN = "https://bigb.invalid";
 const DEFAULT_POST_AUTH_PATH = "/";
 const OAUTH_RETURN_STORAGE_KEY = "pf-auth-return-path";
 const LAST_VISITED_PATH_STORAGE_KEY = "pf-last-visited-path";
-const OAUTH_RETURN_MAX_AGE_MS = 15 * 60 * 1000;
+const PASSWORD_RECOVERY_REQUEST_STORAGE_KEY = "pf-password-recovery-request";
+const OAUTH_RETURN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const PASSWORD_RECOVERY_REQUEST_MAX_AGE_MS = 60 * 60 * 1000;
 
 type KeyValueStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
@@ -42,6 +44,36 @@ export function isPasswordRecoveryCallbackUrl(url: URL): boolean {
   );
 }
 
+export function savePasswordRecoveryRequest(storage: KeyValueStorage, now = Date.now()): void {
+  storage.setItem(PASSWORD_RECOVERY_REQUEST_STORAGE_KEY, String(now));
+}
+
+export function clearPasswordRecoveryRequest(storage: KeyValueStorage): void {
+  storage.removeItem(PASSWORD_RECOVERY_REQUEST_STORAGE_KEY);
+}
+
+export function isPendingPasswordRecoveryCallback(
+  url: URL,
+  storage: KeyValueStorage,
+  now = Date.now(),
+): boolean {
+  if (!url.searchParams.has("code")) return false;
+
+  const saved = storage.getItem(PASSWORD_RECOVERY_REQUEST_STORAGE_KEY);
+  if (saved === null) return false;
+
+  const requestedAt = Number(saved);
+  if (
+    !Number.isSafeInteger(requestedAt) ||
+    now - requestedAt < 0 ||
+    now - requestedAt > PASSWORD_RECOVERY_REQUEST_MAX_AGE_MS
+  ) {
+    clearPasswordRecoveryRequest(storage);
+    return false;
+  }
+  return true;
+}
+
 export function createAuthEntryPath(returnPath: string, profile = false): string {
   const auth = new URL("/auth", APP_ORIGIN);
   if (profile) auth.searchParams.set("view", "profile");
@@ -53,6 +85,19 @@ export function createAuthCallbackUrl(origin: string, returnPath: string): strin
   const callback = new URL("/auth", origin);
   callback.searchParams.set("next", getSafeReturnPath(returnPath));
   return callback.toString();
+}
+
+export function getOAuthCallbackReturnPath(
+  callbackUrl: URL,
+  savedReturnPath: string | null,
+): string | null {
+  if (!callbackUrl.searchParams.has("code")) return null;
+
+  const callbackPath = getSafeReturnPath(callbackUrl.searchParams.get("next"), "");
+  if (callbackPath) return callbackPath;
+
+  const savedPath = getSafeReturnPath(savedReturnPath, "");
+  return savedPath || null;
 }
 
 export function saveLastVisitedPath(storage: KeyValueStorage, path: string): void {

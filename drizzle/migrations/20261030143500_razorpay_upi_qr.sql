@@ -2,38 +2,20 @@ ALTER TABLE public.razorpay_payment_orders
   ADD COLUMN IF NOT EXISTS payment_method text NOT NULL DEFAULT 'razorpay',
   ADD COLUMN IF NOT EXISTS razorpay_qr_code_id text;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'razorpay_payment_orders_payment_method_check'
-      AND conrelid = 'public.razorpay_payment_orders'::regclass
-  ) THEN
-    ALTER TABLE public.razorpay_payment_orders
-      ADD CONSTRAINT razorpay_payment_orders_payment_method_check
-      CHECK (payment_method IN ('razorpay', 'upi', 'qr'));
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'razorpay_payment_orders_provider_reference_check'
-      AND conrelid = 'public.razorpay_payment_orders'::regclass
-  ) THEN
-    ALTER TABLE public.razorpay_payment_orders
-      ADD CONSTRAINT razorpay_payment_orders_provider_reference_check
-      CHECK (
-        NOT (
-          razorpay_order_id IS NOT NULL
-          AND razorpay_qr_code_id IS NOT NULL
-        )
-        AND (razorpay_qr_code_id IS NULL OR payment_method = 'qr')
-        AND (razorpay_order_id IS NULL OR payment_method IN ('razorpay', 'upi'))
-      );
-  END IF;
-END
-$$;
+ALTER TABLE public.razorpay_payment_orders
+  DROP CONSTRAINT IF EXISTS razorpay_payment_orders_payment_method_check,
+  ADD CONSTRAINT razorpay_payment_orders_payment_method_check
+    CHECK (payment_method IN ('razorpay', 'upi', 'qr')),
+  DROP CONSTRAINT IF EXISTS razorpay_payment_orders_provider_reference_check,
+  ADD CONSTRAINT razorpay_payment_orders_provider_reference_check
+    CHECK (
+      NOT (
+        razorpay_order_id IS NOT NULL
+        AND razorpay_qr_code_id IS NOT NULL
+      )
+      AND (razorpay_qr_code_id IS NULL OR payment_method = 'qr')
+      AND (razorpay_order_id IS NULL OR payment_method IN ('razorpay', 'upi'))
+    );
 
 CREATE UNIQUE INDEX IF NOT EXISTS razorpay_payment_orders_qr_code_id_idx
   ON public.razorpay_payment_orders (razorpay_qr_code_id)

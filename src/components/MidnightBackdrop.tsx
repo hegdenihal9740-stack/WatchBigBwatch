@@ -1,4 +1,4 @@
-import midnightSky from "@/assets/midnight-sky.jpg";
+import midnightSky from "@/assets/midnight-sky.webp";
 
 const PATHS = [
   "M-50 760 C 300 620, 700 560, 1000 420 S 1560 160, 1980 120",
@@ -16,6 +16,8 @@ export function MidnightBackdrop({ variant = "hero" }: { variant?: "hero" | "qui
         alt=""
         width={1920}
         height={1088}
+        fetchPriority="low"
+        decoding="async"
       />
       <svg className="flight-paths" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
         {PATHS.map((d, i) => (

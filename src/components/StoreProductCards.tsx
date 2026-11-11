@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { ScanLine, Search, Star } from "lucide-react";
 import { toast } from "sonner";
 import { cart, getProductPrice } from "@/lib/cart";
-import { watches, type WatchTone } from "@/lib/watches";
+import { watchThumbnails, watches, type WatchTone } from "@/lib/watches";
 import { ensureProducts, isBuiltIn } from "@/lib/products";
 import { cardMeta as meta } from "@/lib/watch-meta";
 
@@ -38,11 +38,12 @@ export function WatchProductCard({ tone }: { tone: WatchTone }) {
   const m = meta[w.id];
   const price = getProductPrice(w.id);
   const off = price === undefined ? 0 : Math.round((1 - price / m.list) * 100);
+  const image = isBuiltIn(w.id) ? watchThumbnails[w.id as WatchTone] : w.image;
   return (
     <article className="store-card-card">
       {m.badge && <span className="store-card-badge">{m.badge}</span>}
       <Link to="/shop/$watchId" params={{ watchId: w.id }} className="store-card-img">
-        <img src={w.image} alt={w.name} loading="lazy" />
+        <img src={image} alt={w.name} loading="lazy" decoding="async" />
       </Link>
       <div className="store-card-body">
         <p className="store-card-eyebrow">BIG-B · {w.finish}</p>

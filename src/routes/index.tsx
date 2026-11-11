@@ -1,16 +1,23 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { MidnightBackdrop } from "@/components/MidnightBackdrop";
-import type { WatchTone } from "@/lib/watches";
-import watchGold from "@/assets/watch-gold.webp";
-import watchSteel from "@/assets/watch-steel.webp";
-import watchRosegold from "@/assets/watch-rosegold.webp";
-import watchBlack from "@/assets/watch-black.webp";
-import tryonArm from "@/assets/tryon-arm.jpg";
-import { tryOnImages } from "@/lib/try-on-images";
+import { watchImages, type WatchTone } from "@/lib/watches";
+import tryonArm from "@/assets/tryon-arm.webp";
+import { tryOnDemoImages } from "@/lib/try-on-demo-images";
 import { watches as watchList } from "@/lib/watches";
 import { SiteFooter } from "@/components/SiteFooter";
 import bigBLogoDark from "@/assets/big-b-logo-dark.png";
+import type {
+  AmbientLight,
+  BufferGeometry,
+  Group,
+  Material,
+  MeshPhysicalMaterial,
+  PerspectiveCamera,
+  PointLight,
+  Scene as ThreeScene,
+  WebGLRenderer,
+} from "three";
 
 const VirtualTryOn = lazy(() =>
   import("@/components/VirtualTryOn").then((module) => ({ default: module.VirtualTryOn })),
@@ -42,7 +49,51 @@ function Index() {
   const rootRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const [tryOnTone, setTryOnTone] = useState<WatchTone | null>(null);
+  const [shouldStartHeroScene, setShouldStartHeroScene] = useState(false);
   const tryOnWatch = watchList.find(w => w.id === tryOnTone);
+
+  useEffect(() => {
+    if (
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches ||
+      window.scrollY > 0
+    ) {
+      setShouldStartHeroScene(true);
+      return;
+    }
+
+    let userInitiatedScroll = false;
+    const noteScrollInput = (event: Event) => {
+      if (!event.isTrusted) return;
+      if (
+        event instanceof KeyboardEvent &&
+        !["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "].includes(event.key)
+      ) {
+        return;
+      }
+      userInitiatedScroll = true;
+    };
+    const startScene = () => {
+      if (!userInitiatedScroll) return;
+      setShouldStartHeroScene(true);
+      window.removeEventListener("scroll", startScene);
+      window.removeEventListener("wheel", noteScrollInput);
+      window.removeEventListener("touchstart", noteScrollInput);
+      window.removeEventListener("pointerdown", noteScrollInput);
+      window.removeEventListener("keydown", noteScrollInput);
+    };
+    window.addEventListener("wheel", noteScrollInput, { passive: true });
+    window.addEventListener("touchstart", noteScrollInput, { passive: true });
+    window.addEventListener("pointerdown", noteScrollInput, { passive: true });
+    window.addEventListener("keydown", noteScrollInput);
+    window.addEventListener("scroll", startScene, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", startScene);
+      window.removeEventListener("wheel", noteScrollInput);
+      window.removeEventListener("touchstart", noteScrollInput);
+      window.removeEventListener("pointerdown", noteScrollInput);
+      window.removeEventListener("keydown", noteScrollInput);
+    };
+  }, []);
 
   useEffect(() => {
     const KEY = 'home-scroll-y';
@@ -73,8 +124,9 @@ function Index() {
   }, []);
 
   useEffect(() => {
+    if (!shouldStartHeroScene) return;
+
     let disposed = false;
-    let sceneStarted = false;
     const cleanups: Array<() => void> = [];
 
     const loadScene = async () => {
@@ -89,7 +141,8 @@ function Index() {
       const TONES: Record<string, number> = { steel: 0xb9c6cf, black: 0x3a3f46, gold: 0xd9b45a, rosegold: 0xe0a48e };
       const basePaint = new THREE.Color(0x181a20);
       const toneColor = new THREE.Color();
-      let tintMaterial: any = null;
+      let tintMaterial: MeshPhysicalMaterial | null = null;
+      const watchProximities = new Map<HTMLImageElement, number>();
       let activeTone = "";
 
       // Keep the jet's on-screen size constant: it must never look bigger later
@@ -98,18 +151,18 @@ function Index() {
       const JET_REF_DISTANCE = 181;
 
       class Scene {
-        views: Array<{ bottom: number; height: number; camera: any }>;
-        renderer: any;
-        scene: any;
-        light: any;
-        softLight: any;
-        modelGroup: any;
+        views: Array<{ bottom: number; height: number; camera: PerspectiveCamera | null }>;
+        renderer: WebGLRenderer;
+        scene: ThreeScene;
+        light: PointLight;
+        softLight: AmbientLight;
+        modelGroup: Group;
         w = 0;
         h = 0;
         aircraftSamples: Array<InstanceType<typeof THREE.Vector3>> = [];
         projectedSample = new THREE.Vector3();
 
-        constructor(model: any) {
+        constructor(model: Group) {
           model.updateWorldMatrix(true, true);
           const bounds = new THREE.Box3().setFromObject(model);
           // Sample the fuselage from tail to nose, in the animated group's local space.
@@ -125,7 +178,7 @@ function Index() {
           this.renderer.debug.checkShaderErrors = false;
           this.renderer.setSize(window.innerWidth, window.innerHeight);
           this.renderer.setPixelRatio(
-            Math.min(window.devicePixelRatio, window.innerWidth < 768 ? 1.5 : 1.75),
+            Math.min(window.devicePixelRatio, 1.25),
           );
           this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
            this.renderer.toneMappingExposure = 1.35;
@@ -201,7 +254,7 @@ function Index() {
             const camera = view.camera;
             const bottom = Math.floor(this.h * view.bottom);
             const height = Math.floor(this.h * view.height);
-            if (height <= 0) continue;
+            if (!camera || height <= 0) continue;
 
             this.renderer.setViewport(0, 0, this.w, this.h);
             this.renderer.setScissor(0, bottom, this.w, height);
@@ -236,17 +289,17 @@ function Index() {
             }
             const proximity = 1 - THREE.MathUtils.smoothstep(distance, 0, reach);
             watch.style.setProperty("--watch-proximity", proximity.toFixed(3));
-            (watch as any)._prox = proximity;
+            watchProximities.set(watch, proximity);
           });
           // Spotlight + color sync: find the watch the jet is passing.
           let best: HTMLImageElement | null = null;
           let bestProx = 0;
           for (const watch of watches) {
-            const p = (watch as any)._prox ?? 0;
+            const p = watchProximities.get(watch) ?? 0;
             if (p > bestProx) { bestProx = p; best = watch; }
           }
           for (const watch of watches) {
-            const own = (watch as any)._prox ?? 0;
+            const own = watchProximities.get(watch) ?? 0;
             watch.style.setProperty("--watch-dim", (bestProx * (1 - own)).toFixed(3));
           }
           const nose = aircraftPixels[aircraftPixels.length - 1];
@@ -292,7 +345,7 @@ function Index() {
         };
       }
 
-      async function setupAnimation(scene: any) {
+      async function setupAnimation(scene: Scene) {
         if (disposed) return;
         const { gsap } = await import("gsap");
         if (disposed) return;
@@ -302,6 +355,7 @@ function Index() {
 
         const ctx = gsap.context(() => {
            gsap.to(".loading", { autoAlpha: 0, duration: 0.4 });
+          gsap.to(jetCanvas, { autoAlpha: 1, duration: 0.6 });
 
           const tau = Math.PI * 2;
           // On narrow screens the camera sees a thinner slice of the scene, so
@@ -428,7 +482,7 @@ function Index() {
       const glass = new THREE.MeshPhysicalMaterial({ color: 0x151b1d, metalness: 0.22, roughness: 0.08, clearcoat: 1, side: THREE.DoubleSide });
       const intake = new THREE.MeshStandardMaterial({ color: 0x090a0a, metalness: 0.85, roughness: 0.28, side: THREE.DoubleSide });
       const jet = new THREE.Group();
-      const add = (geometry: any, material: any, position: [number, number, number], rotation: [number, number, number] = [0, 0, 0]) => {
+      const add = (geometry: BufferGeometry, material: Material | Material[], position: [number, number, number], rotation: [number, number, number] = [0, 0, 0]) => {
         const mesh = new THREE.Mesh(geometry, material);
         mesh.position.set(...position);
         mesh.rotation.set(...rotation);
@@ -558,28 +612,24 @@ function Index() {
         if (animationStarted) return;
         animationStarted = true;
         window.removeEventListener("scroll", startAnimation);
-        void setupAnimation(scene);
+        void setupAnimation(scene).catch((error: unknown) => {
+          console.error("Could not start the homepage flight animation", error);
+        });
       };
       window.addEventListener("scroll", startAnimation, { once: true, passive: true });
       cleanups.push(() => window.removeEventListener("scroll", startAnimation));
       if (window.scrollY > 0) startAnimation();
     };
 
-    const startScene = () => {
-      if (sceneStarted || disposed) return;
-      sceneStarted = true;
-      window.removeEventListener("scroll", startScene);
-      void loadScene();
-    };
-
-    window.addEventListener("scroll", startScene, { once: true, passive: true });
+    void loadScene().catch((error: unknown) => {
+      console.error("Could not load the homepage flight scene", error);
+    });
 
     return () => {
       disposed = true;
-      window.removeEventListener("scroll", startScene);
       cleanups.forEach((fn) => fn());
     };
-  }, []);
+  }, [shouldStartHeroScene]);
 
   const scrollToBottom = () => {
     document.querySelector(".tryon-showcase")?.scrollIntoView({
@@ -620,23 +670,23 @@ function Index() {
         <div className="section right">
             <h2>Sculpted in Surgical Steel</h2>
             <p>Brushed bevels · Seamless symmetry</p>
-          <img src={watchSteel} data-tone="steel" alt="Luxury steel dive watch" className="watch-img" width={1024} height={1024} loading="lazy" />
+          <img src={watchImages.steel} data-tone="steel" alt="Luxury steel dive watch" className="watch-img" width={1024} height={1024} loading="eager" fetchPriority="high" decoding="async" />
         </div>
         <div className="ground-container">
           <div className="section right">
               <h2>Rose Gold Edition</h2>
               <p>Warm luster · Satin-finish bezel</p>
-            <img src={watchRosegold} data-tone="rosegold" alt="Luxury rose gold watch" className="watch-img" width={1024} height={1024} loading="lazy" />
+            <img src={watchImages.rosegold} data-tone="rosegold" alt="Luxury rose gold watch" className="watch-img" width={1024} height={1024} loading="lazy" decoding="async" />
           </div>
           <div className="section">
             <h2>Black Skeleton</h2>
             <p>Skeleton-style dial · Analog automatic</p>
-            <img src={watchBlack} data-tone="black" alt="Luxury black skeleton watch" className="watch-img" width={1024} height={1024} loading="lazy" />
+            <img src={watchImages.black} data-tone="black" alt="Luxury black skeleton watch" className="watch-img" width={1024} height={1024} loading="lazy" decoding="async" />
           </div>
           <div className="section right">
               <h2>Gold Chronograph</h2>
               <p>Layered subdial chronograph · Polished gold links</p>
-            <img src={watchGold} data-tone="gold" alt="Luxury gold chronograph watch" className="watch-img" width={1024} height={1024} loading="lazy" />
+            <img src={watchImages.gold} data-tone="gold" alt="Luxury gold chronograph watch" className="watch-img" width={1024} height={1024} loading="lazy" decoding="async" />
           </div>
         </div>
 
@@ -652,7 +702,7 @@ function Index() {
               <div className="tryon-demo-frame">
                 <div className="tryon-rotor">
                   <img src={tryonArm} alt="" className="tryon-arm" width={768} height={1024} loading="lazy" decoding="async" />
-                  {[tryOnImages.steel, tryOnImages.gold, tryOnImages.rosegold, tryOnImages.black].map((src, i) => <img key={src} src={src} alt="" className="tryon-demo-watch" loading="lazy" decoding="async" style={{ animationDelay: `${i * 3}s` }} />)}
+                  {[tryOnDemoImages.steel, tryOnDemoImages.gold, tryOnDemoImages.rosegold, tryOnDemoImages.black].map((src, i) => <img key={src} src={src} alt="" className="tryon-demo-watch" loading="lazy" decoding="async" style={{ animationDelay: `${i * 3}s` }} />)}
                 </div>
                 <div className="tryon-scan" />
                 <span className="tryon-badge">● Fitted to your wrist</span>

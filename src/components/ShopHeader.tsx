@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { Instagram, Mail, MessageCircle, MoreVertical, Phone, UserRound } from 'lucide-react';
+import { Instagram, Mail, MessageCircle, MoreVertical, Phone, ShoppingCart, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useCustomer } from '@/components/CustomerAccounts';
@@ -8,6 +8,7 @@ import { AuthLink } from '@/components/AuthLink';
 import { BottomNav } from '@/components/BottomNav';
 import { whatsappLink } from '@/lib/whatsapp';
 import { STORE_CONTACT_EMAIL_URL } from '@/lib/store-info';
+import { cart, useCart } from '@/lib/cart';
 import bigBLogoDark from '@/assets/big-b-logo-dark.png';
 import bigBLogoLight from '@/assets/big-b-logo-light.png';
 
@@ -21,6 +22,7 @@ const contacts = [
 export function ShopHeader() {
   const [menu, setMenu] = useState(false);
   const { user, ready } = useCustomer();
+  const { count } = useCart();
   const [signingOut, setSigningOut] = useState(false);
   const customerName = String(user?.user_metadata?.['display_name'] ?? user?.user_metadata?.['full_name'] ?? user?.user_metadata?.['name'] ?? user?.email ?? 'Customer');
   const signOut = async () => {
@@ -49,6 +51,17 @@ export function ShopHeader() {
       <span>BIG-B</span>
     </Link>
     <div className="shop-right">
+      {user && <Link to="/account" className="shop-account-link"><UserRound size={16} /> Account</Link>}
+      <button
+        type="button"
+        className="shop-desktop-cart"
+        aria-label={count ? `Open cart, ${count} item${count === 1 ? '' : 's'}` : 'Open cart'}
+        onClick={() => cart.setOpen(true)}
+      >
+        <ShoppingCart size={18} />
+        <span>Cart</span>
+        {count > 0 && <span className="shop-cart-badge">{count}</span>}
+      </button>
       {user ? <button type="button" className="shop-login-link" disabled={signingOut} onClick={() => void signOut()}><UserRound size={16} /> {signingOut ? 'Signing out…' : `${customerName.split(' ')[0]} · Logout`}</button>
         : ready ? <AuthLink className="shop-login-link"><UserRound size={16} /> Login / Register</AuthLink>
           : <span className="shop-login-link" aria-live="polite">Loading account…</span>}

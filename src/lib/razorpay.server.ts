@@ -10,12 +10,11 @@ import {
 } from "@/lib/razorpay-signature";
 import {
   validateRazorpayOrderPayment,
-  validateRazorpayQrPayment,
   type RazorpayPaymentRecord,
 } from "@/lib/razorpay-payment-validation";
 
 type RazorpayStatus = "creating" | "pending" | "paid" | "paid_review" | "failed";
-type ProviderStatus = "created" | "authorized" | "captured" | "failed" | "refunded";
+type ProviderStatus = RazorpayPaymentRecord["status"];
 
 type RazorpayAttempt = {
   id: string;
@@ -25,34 +24,48 @@ type RazorpayAttempt = {
   address: unknown;
   clear_cart: boolean;
   currency: string;
-  payment_method: "razorpay" | "upi" | "qr";
   razorpay_order_id: string | null;
-  razorpay_qr_code_id: string | null;
   payment_id: string | null;
   status: RazorpayStatus;
 };
 
 type ProviderPayment = RazorpayPaymentRecord;
 
-type ProviderQrCode = {
-  id: string;
-  imageUrl: string;
-  paymentAmount: number;
-  status: "active" | "closed";
-  closeBy: number;
-};
+type PaymentResult = ReturnType<typeof paymentResult>;
+type RazorpayPaymentOrderResponse =
+  | (Omit<PaymentResult, "status"> & {
+      status: "pending";
+      keyId: string;
+      razorpayOrderId: string;
+      amount: number;
+      currency: string;
+      email: string | null;
+      name: string;
+      mobile: string;
+    })
+  | (Omit<PaymentResult, "status"> & {
+      status: "paid" | "paid_review" | "failed";
+    });
+
+const paymentAttemptSelection =
+  "id,user_id,items,total,address,clear_cart,currency,razorpay_order_id,payment_id,status";
+
+function paymentStorageError(error: unknown): Error {
+  const code = isRecord(error) && typeof error["code"] === "string" ? error["code"] : null;
+  if (code && ["42P01", "42703", "PGRST204", "PGRST205"].includes(code)) {
+    return new Error(
+      "Razorpay payment storage is not set up in Supabase. Apply migration 20261029064858_razorpay_payment_orders, then retry.",
+    );
+  }
+  return new Error(
+    "Could not prepare your Razorpay payment. Check the server Supabase setup and retry.",
+  );
+}
 
 function parseRazorpayAttempt(
   attempt: Omit<RazorpayAttempt, "status"> & { status: string },
 ): RazorpayAttempt {
   const { status } = attempt;
-  if (
-    attempt.payment_method !== "razorpay" &&
-    attempt.payment_method !== "upi" &&
-    attempt.payment_method !== "qr"
-  ) {
-    throw new Error("The database returned an unsupported Razorpay payment method.");
-  }
   if (
     status !== "creating" &&
     status !== "pending" &&
@@ -112,10 +125,20 @@ async function razorpayRequest(path: string, init?: RequestInit): Promise<unknow
   }
   if (!response.ok) {
     const body = isRecord(payload) && isRecord(payload["error"]) ? payload["error"] : {};
+    const code = typeof body["code"] === "string" ? body["code"] : "unknown";
+    const reason = typeof body["reason"] === "string" ? body["reason"] : undefined;
+    const field = typeof body["field"] === "string" ? body["field"] : undefined;
     console.error("[Razorpay] Provider request failed", {
       status: response.status,
-      code: typeof body["code"] === "string" ? body["code"] : "unknown",
+      code,
+      ...(reason ? { reason } : {}),
+      ...(field ? { field } : {}),
     });
+    if (response.status === 401) {
+      throw new Error(
+        "Razorpay rejected the API credentials. Check that RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are a matching pair from the same Razorpay account and mode.",
+      );
+    }
     throw new Error("Razorpay could not process the payment request. Please try again.");
   }
   return payload;
@@ -143,42 +166,30 @@ function parseProviderPayment(value: unknown): ProviderPayment {
     amount: expectInteger(payment["amount"], "Razorpay returned an invalid payment amount."),
     currency: expectString(payment["currency"], "Razorpay returned an invalid currency."),
     status,
-    ...(typeof payment["method"] === "string" ? { method: payment["method"] } : {}),
+    method: typeof payment["method"] === "string" ? payment["method"] : null,
   };
 }
 
-function parseProviderQrCode(value: unknown): ProviderQrCode {
-  const qrCode = expectRecord(value, "Razorpay returned invalid QR code details.");
-  const imageUrl = expectString(qrCode["image_url"], "Razorpay returned an invalid QR code URL.");
-  let url: URL;
-  try {
-    url = new URL(imageUrl);
-  } catch {
-    throw new Error("Razorpay returned an invalid QR code URL.");
-  }
-  const status = qrCode["status"];
-  if (status !== "active" && status !== "closed") {
-    throw new Error("Razorpay returned an unsupported QR code status.");
-  }
-  if (
-    qrCode["type"] !== "upi_qr" ||
-    qrCode["usage"] !== "single_use" ||
-    qrCode["fixed_amount"] !== true ||
-    url.protocol !== "https:" ||
-    url.hostname !== "rzp.io"
-  ) {
-    throw new Error("Razorpay returned an unsupported QR code.");
-  }
-  return {
-    id: expectString(qrCode["id"], "Razorpay returned an invalid QR code ID."),
-    imageUrl,
-    paymentAmount: expectInteger(
-      qrCode["payment_amount"],
-      "Razorpay returned an invalid QR code amount.",
-    ),
-    status,
-    closeBy: expectInteger(qrCode["close_by"], "Razorpay returned an invalid QR code expiry."),
+function parsePaymentAddress(value: unknown): PaymentAddress {
+  const address = expectRecord(value, "Payment order contains invalid delivery details.");
+  const optionalString = (key: string) => {
+    const field = address[key];
+    if (field !== undefined && typeof field !== "string") {
+      throw new Error("Payment order contains invalid delivery details.");
+    }
+    return field;
   };
+  return validateAddress({
+    name: expectString(address["name"], "Payment order contains invalid delivery details."),
+    mobile: expectString(address["mobile"], "Payment order contains invalid delivery details."),
+    address: expectString(address["address"], "Payment order contains invalid delivery details."),
+    city: expectString(address["city"], "Payment order contains invalid delivery details."),
+    state: expectString(address["state"], "Payment order contains invalid delivery details."),
+    pincode: expectString(address["pincode"], "Payment order contains invalid delivery details."),
+    locality: optionalString("locality"),
+    landmark: optionalString("landmark"),
+    type: optionalString("type"),
+  });
 }
 
 function parseAttemptItems(value: unknown): { id: string; qty: number; price: number }[] {
@@ -208,7 +219,7 @@ function paymentResult(attempt: RazorpayAttempt) {
     count: items.reduce((sum, item) => sum + item.qty, 0),
     items,
     clearCart: attempt.clear_cart,
-    paymentMethod: attempt.payment_method,
+    paymentMethod: "razorpay" as const,
     status: attempt.status,
   };
 }
@@ -216,9 +227,7 @@ function paymentResult(attempt: RazorpayAttempt) {
 async function getAttemptById(orderId: string, userId?: string): Promise<RazorpayAttempt> {
   let query = supabaseAdmin
     .from("razorpay_payment_orders")
-    .select(
-      "id,user_id,items,total,address,clear_cart,currency,payment_method,razorpay_order_id,razorpay_qr_code_id,payment_id,status",
-    )
+    .select(paymentAttemptSelection)
     .eq("id", orderId);
   if (userId) query = query.eq("user_id", userId);
   const { data, error } = await query.maybeSingle();
@@ -232,29 +241,12 @@ async function getAttemptById(orderId: string, userId?: string): Promise<Razorpa
 async function getAttemptByProviderId(providerOrderId: string): Promise<RazorpayAttempt | null> {
   const { data, error } = await supabaseAdmin
     .from("razorpay_payment_orders")
-    .select(
-      "id,user_id,items,total,address,clear_cart,currency,payment_method,razorpay_order_id,razorpay_qr_code_id,payment_id,status",
-    )
+    .select(paymentAttemptSelection)
     .eq("razorpay_order_id", providerOrderId)
     .maybeSingle();
   if (error) {
     console.error("[Razorpay] Could not match provider order", { providerOrderId, error });
     throw new Error("Could not match this Razorpay payment to a store order.");
-  }
-  return data ? parseRazorpayAttempt(data) : null;
-}
-
-async function getAttemptByQrCodeId(qrCodeId: string): Promise<RazorpayAttempt | null> {
-  const { data, error } = await supabaseAdmin
-    .from("razorpay_payment_orders")
-    .select(
-      "id,user_id,items,total,address,clear_cart,currency,payment_method,razorpay_order_id,razorpay_qr_code_id,payment_id,status",
-    )
-    .eq("razorpay_qr_code_id", qrCodeId)
-    .maybeSingle();
-  if (error) {
-    console.error("[Razorpay] Could not match QR code", { qrCodeId, error });
-    throw new Error("Could not match this Razorpay QR code to a store order.");
   }
   return data ? parseRazorpayAttempt(data) : null;
 }
@@ -289,33 +281,9 @@ function validateProviderPayment(payment: ProviderPayment, attempt: RazorpayAtte
   validateRazorpayOrderPayment(payment, attempt.razorpay_order_id, attempt.total);
 }
 
-function validateProviderQrPayment(payment: ProviderPayment, attempt: RazorpayAttempt) {
-  if (attempt.payment_method !== "qr" || !attempt.razorpay_qr_code_id) {
-    throw new Error("This payment attempt is not linked to a Razorpay QR code.");
-  }
-  validateRazorpayQrPayment(payment, attempt.total);
-}
-
 async function fetchProviderPayment(paymentId: string): Promise<ProviderPayment> {
   const result = await razorpayRequest(`/payments/${encodeURIComponent(paymentId)}`);
   return parseProviderPayment(result);
-}
-
-async function fetchProviderQrCode(qrCodeId: string, total: number): Promise<ProviderQrCode> {
-  const qrCode = parseProviderQrCode(
-    await razorpayRequest(`/payments/qr_codes/${encodeURIComponent(qrCodeId)}`),
-  );
-  if (qrCode.id !== qrCodeId || qrCode.paymentAmount !== total * 100) {
-    throw new Error("Razorpay QR code does not match this checkout amount.");
-  }
-  return qrCode;
-}
-
-function qrCodeResult(qrCode: ProviderQrCode) {
-  return {
-    imageUrl: qrCode.imageUrl,
-    expiresAt: qrCode.closeBy * 1000,
-  };
 }
 
 async function finalizeVerifiedPayment(
@@ -408,6 +376,38 @@ async function notifyPaidRazorpayOrder(orderId: string) {
   }
 }
 
+async function responseForExistingPayment(
+  attempt: RazorpayAttempt,
+  keyId: string,
+  email: string | null,
+  address: PaymentAddress,
+): Promise<RazorpayPaymentOrderResponse> {
+  if (
+    attempt.status === "paid" ||
+    attempt.status === "paid_review" ||
+    attempt.status === "failed"
+  ) {
+    return { ...paymentResult(attempt), status: attempt.status };
+  }
+  if (attempt.status === "creating") {
+    throw new Error("Payment setup is still in progress. Please retry in a few seconds.");
+  }
+  if (!attempt.razorpay_order_id) {
+    throw new Error("Payment setup is still in progress. Please retry in a few seconds.");
+  }
+  return {
+    ...paymentResult(attempt),
+    status: "pending",
+    keyId,
+    razorpayOrderId: attempt.razorpay_order_id,
+    amount: attempt.total * 100,
+    currency: attempt.currency,
+    email,
+    name: address.name,
+    mobile: address.mobile,
+  };
+}
+
 export async function createRazorpayPaymentOrder(
   userId: string,
   email: string | null,
@@ -415,54 +415,29 @@ export async function createRazorpayPaymentOrder(
   rawAddress: PaymentAddress,
   idempotencyKey: string,
   clearCart: boolean,
-  paymentMethod: "razorpay" | "upi" | "qr",
-) {
+): Promise<RazorpayPaymentOrderResponse> {
   const config = razorpayConfig();
   const address = validateAddress(rawAddress);
   const existingResult = await supabaseAdmin
     .from("razorpay_payment_orders")
-    .select(
-      "id,user_id,items,total,address,clear_cart,currency,payment_method,razorpay_order_id,razorpay_qr_code_id,payment_id,status",
-    )
+    .select(paymentAttemptSelection)
     .eq("user_id", userId)
     .eq("idempotency_key", idempotencyKey)
     .maybeSingle();
   if (existingResult.error) {
     console.error("[Razorpay] Could not check payment idempotency key", existingResult.error);
-    throw new Error("Could not start online payment. Please try again.");
+    throw paymentStorageError(existingResult.error);
   }
   if (existingResult.data) {
     const existing = parseRazorpayAttempt(existingResult.data);
-    if (!sameLines(existing.items, lines) || !sameAddress(existing.address, address)) {
+    if (
+      !sameLines(existing.items, lines) ||
+      !sameAddress(existing.address, address) ||
+      existing.clear_cart !== clearCart
+    ) {
       throw new Error("This payment request was already used. Start checkout again.");
     }
-    if (existing.payment_method !== paymentMethod) {
-      throw new Error("This payment request was already used with a different payment method.");
-    }
-    if (existing.status === "failed") {
-      throw new Error("This payment attempt failed. Start a new payment attempt.");
-    }
-    if (paymentMethod === "qr") {
-      if (existing.status === "creating" || !existing.razorpay_qr_code_id) {
-        throw new Error("QR setup is still in progress. Please retry in a few seconds.");
-      }
-      const current = await checkRazorpayPaymentStatus(userId, existing.id);
-      if (current.status !== "pending") return current;
-      return { ...current, keyId: config.keyId };
-    }
-    if (existing.status === "creating" || !existing.razorpay_order_id) {
-      throw new Error("Payment setup is still in progress. Please retry in a few seconds.");
-    }
-    return {
-      ...paymentResult(existing),
-      keyId: config.keyId,
-      razorpayOrderId: existing.razorpay_order_id,
-      amount: existing.total * 100,
-      currency: existing.currency,
-      email,
-      name: address.name,
-      mobile: address.mobile,
-    };
+    return responseForExistingPayment(existing, config.keyId, email, address);
   }
 
   const { total, items } = await priceOrderLines(lines);
@@ -476,108 +451,34 @@ export async function createRazorpayPaymentOrder(
     address,
     currency: "INR",
     clear_cart: clearCart,
-    payment_method: paymentMethod,
     status: "creating",
   });
   if (insertError) {
     if (insertError.code === "23505") {
       const { data: racedAttempt, error: readError } = await supabaseAdmin
         .from("razorpay_payment_orders")
-        .select(
-          "id,user_id,items,total,address,clear_cart,currency,payment_method,razorpay_order_id,razorpay_qr_code_id,payment_id,status",
-        )
+        .select(paymentAttemptSelection)
         .eq("user_id", userId)
         .eq("idempotency_key", idempotencyKey)
         .maybeSingle();
       if (!readError && racedAttempt) {
         const existing = parseRazorpayAttempt(racedAttempt);
-        if (existing.payment_method !== paymentMethod) {
-          throw new Error("This payment request was already used with a different payment method.");
-        }
-        if (paymentMethod === "qr" && existing.razorpay_qr_code_id && existing.status !== "failed") {
-          const current = await checkRazorpayPaymentStatus(userId, existing.id);
-          if (current.status !== "pending") return current;
-          return { ...current, keyId: config.keyId };
-        }
-        if (existing.razorpay_order_id && existing.status !== "failed") {
-          return {
-            ...paymentResult(existing),
-            keyId: config.keyId,
-            razorpayOrderId: existing.razorpay_order_id,
-            amount: existing.total * 100,
-            currency: existing.currency,
-            email,
-            name: address.name,
-            mobile: address.mobile,
-          };
+        if (
+          sameLines(existing.items, lines) &&
+          sameAddress(existing.address, address) &&
+          existing.clear_cart === clearCart
+        ) {
+          return responseForExistingPayment(existing, config.keyId, email, address);
         }
       }
       if (readError) console.error("[Razorpay] Could not read existing payment attempt", readError);
       throw new Error("Payment setup is already in progress. Please retry in a few seconds.");
     }
     console.error("[Razorpay] Could not create payment record", insertError);
-    throw new Error("Could not start online payment. Please try again.");
+    throw paymentStorageError(insertError);
   }
 
-  let createdQrCodeId: string | null = null;
   try {
-    if (paymentMethod === "qr") {
-      const closeBy = Math.floor(Date.now() / 1000) + 60 * 60;
-      const response = expectRecord(
-        await razorpayRequest("/payments/qr_codes", {
-          method: "POST",
-          body: JSON.stringify({
-            type: "upi_qr",
-            name: `BIG-B ${internalId}`,
-            usage: "single_use",
-            fixed_amount: true,
-            payment_amount: total * 100,
-            description: `Order ${internalId}`,
-            close_by: closeBy,
-            notes: { bigb_order_id: internalId },
-          }),
-        }),
-        "Razorpay returned an invalid QR code.",
-      );
-      if (typeof response["id"] === "string") createdQrCodeId = response["id"];
-      const qrCode = parseProviderQrCode(response);
-      if (qrCode.paymentAmount !== total * 100 || qrCode.status !== "active") {
-        throw new Error("Razorpay QR code does not match this checkout.");
-      }
-      const { data: updated, error: updateError } = await supabaseAdmin
-        .from("razorpay_payment_orders")
-        .update({ razorpay_qr_code_id: qrCode.id, status: "pending" })
-        .eq("id", internalId)
-        .eq("status", "creating")
-        .select("id")
-        .maybeSingle();
-      if (updateError || !updated) {
-        console.error("[Razorpay] Could not save QR code ID", {
-          orderId: internalId,
-          error: updateError,
-        });
-        throw new Error("QR code was created but could not be saved.");
-      }
-      return {
-        ...paymentResult({
-          id: internalId,
-          user_id: userId,
-          items,
-          total,
-          address,
-          clear_cart: clearCart,
-          currency: "INR",
-          payment_method: paymentMethod,
-          razorpay_order_id: null,
-          razorpay_qr_code_id: qrCode.id,
-          payment_id: null,
-          status: "pending",
-        }),
-        keyId: config.keyId,
-        qrCode: qrCodeResult(qrCode),
-      };
-    }
-
     const payload = expectRecord(
       await razorpayRequest("/orders", {
         method: "POST",
@@ -619,7 +520,7 @@ export async function createRazorpayPaymentOrder(
       count: items.reduce((sum, item) => sum + item.qty, 0),
       items,
       clearCart,
-      paymentMethod,
+      paymentMethod: "razorpay",
       status: "pending" as const,
       keyId: config.keyId,
       razorpayOrderId: providerOrderId,
@@ -630,40 +531,32 @@ export async function createRazorpayPaymentOrder(
       mobile: address.mobile,
     };
   } catch (error) {
-    let safeToMarkFailed = true;
-    if (createdQrCodeId) {
-      try {
-        await razorpayRequest(
-          `/payments/qr_codes/${encodeURIComponent(createdQrCodeId)}/close`,
-          { method: "POST" },
-        );
-      } catch (closeError) {
-        safeToMarkFailed = false;
-        console.error("[Razorpay] Could not close an unsaved QR code", {
-          orderId: internalId,
-          qrCodeId: createdQrCodeId,
-          error: closeError,
-        });
-      }
-    }
-    if (safeToMarkFailed) {
-      const { error: updateError } = await supabaseAdmin
-        .from("razorpay_payment_orders")
-        .update({ status: "failed" })
-        .eq("id", internalId)
-        .eq("status", "creating");
-      if (updateError) {
-        console.error("[Razorpay] Could not mark payment setup as failed", {
-          orderId: internalId,
-          error: updateError,
-        });
-      }
-    }
-    if (!safeToMarkFailed) {
-      throw new Error("QR setup could not be safely completed. Do not scan it; contact BIG-B support.");
+    const { error: updateError } = await supabaseAdmin
+      .from("razorpay_payment_orders")
+      .update({ status: "failed" })
+      .eq("id", internalId)
+      .eq("status", "creating");
+    if (updateError) {
+      console.error("[Razorpay] Could not mark payment setup as failed", {
+        orderId: internalId,
+        error: updateError,
+      });
     }
     throw error;
   }
+}
+
+export async function resumeRazorpayPaymentOrder(
+  userId: string,
+  orderId: string,
+  email: string | null,
+) {
+  const attempt = await getAttemptById(orderId, userId);
+  if (attempt.status !== "pending") {
+    throw new Error("This Razorpay payment is no longer pending. Check its current status.");
+  }
+  const address = parsePaymentAddress(attempt.address);
+  return responseForExistingPayment(attempt, razorpayConfig().keyId, email, address);
 }
 
 async function resolveProviderPayment(attempt: RazorpayAttempt, paymentId: string) {
@@ -707,30 +600,6 @@ async function getOrderPayments(orderId: string) {
   return result["items"].map(parseProviderPayment);
 }
 
-async function getQrCodePayments(qrCodeId: string) {
-  const result = expectRecord(
-    await razorpayRequest(`/payments/qr_codes/${encodeURIComponent(qrCodeId)}/payments`),
-    "Razorpay returned invalid QR code payment details.",
-  );
-  if (!Array.isArray(result["items"])) {
-    throw new Error("Razorpay returned invalid QR code payment details.");
-  }
-  return result["items"].map(parseProviderPayment);
-}
-
-async function resolveProviderQrPayment(attempt: RazorpayAttempt, paymentId: string) {
-  if (!attempt.razorpay_qr_code_id) {
-    throw new Error("This Razorpay payment order has no QR code.");
-  }
-  const payments = await getQrCodePayments(attempt.razorpay_qr_code_id);
-  const payment = payments.find((candidate) => candidate.id === paymentId);
-  if (!payment) {
-    throw new Error("Razorpay payment was not found on this QR code.");
-  }
-  validateProviderQrPayment(payment, attempt);
-  return payment;
-}
-
 export async function checkRazorpayPaymentStatus(userId: string, orderId: string) {
   const attempt = await getAttemptById(orderId, userId);
   if (
@@ -739,35 +608,6 @@ export async function checkRazorpayPaymentStatus(userId: string, orderId: string
     attempt.status === "failed"
   ) {
     return paymentResult(attempt);
-  }
-  if (attempt.razorpay_qr_code_id) {
-    if (attempt.payment_method !== "qr") {
-      throw new Error("This Razorpay payment order has an invalid QR code reference.");
-    }
-    const qrCode = await fetchProviderQrCode(attempt.razorpay_qr_code_id, attempt.total);
-    const payments = await getQrCodePayments(qrCode.id);
-    for (const payment of payments) validateProviderQrPayment(payment, attempt);
-    const successful = payments.find((payment) => payment.status === "captured");
-    if (successful) return finalizeVerifiedPayment(attempt, "paid", successful.id);
-    const authorized = payments.find((payment) => payment.status === "authorized");
-    if (authorized) {
-      const result = await finalizeVerifiedPayment(attempt, "pending", authorized.id);
-      return { ...result, qrCode: qrCodeResult(qrCode) };
-    }
-    const active = payments.some((payment) => payment.status === "created");
-    if (active) {
-      const result = await finalizeVerifiedPayment(attempt, "pending", null);
-      return { ...result, qrCode: qrCodeResult(qrCode) };
-    }
-    const failed = payments.find((payment) => payment.status === "failed");
-    if (failed && payments.every((payment) => payment.status === "failed")) {
-      return finalizeVerifiedPayment(attempt, "failed", failed.id);
-    }
-    if (qrCode.status === "closed") {
-      return finalizeVerifiedPayment(attempt, "failed", null);
-    }
-    const result = await finalizeVerifiedPayment(attempt, "pending", null);
-    return { ...result, qrCode: qrCodeResult(qrCode) };
   }
   if (!attempt.razorpay_order_id) return paymentResult(attempt);
   const payments = await getOrderPayments(attempt.razorpay_order_id);
@@ -850,7 +690,6 @@ export async function handleRazorpayWebhook(request: Request): Promise<Response>
   }
   const eventName = payload["event"];
   if (
-    eventName !== "qr_code.credited" &&
     eventName !== "payment.captured" &&
     eventName !== "payment.failed" &&
     eventName !== "payment.authorized"
@@ -867,21 +706,6 @@ export async function handleRazorpayWebhook(request: Request): Promise<Response>
   }
 
   try {
-    if (eventName === "qr_code.credited") {
-      const qrPayload =
-        eventPayload && isRecord(eventPayload["qr_code"]) ? eventPayload["qr_code"] : null;
-      const qrEntity = qrPayload && isRecord(qrPayload["entity"]) ? qrPayload["entity"] : null;
-      if (!qrEntity || typeof qrEntity["id"] !== "string") {
-        return new Response("Invalid QR code webhook payload", { status: 400 });
-      }
-      const attempt = await getAttemptByQrCodeId(qrEntity["id"]);
-      if (!attempt) return Response.json({ received: true, ignored: true });
-      const payment = await resolveProviderQrPayment(attempt, entity["id"]);
-      const status =
-        payment.status === "captured" ? "paid" : payment.status === "failed" ? "failed" : "pending";
-      await finalizeVerifiedPayment(attempt, status, payment.id, eventId);
-      return Response.json({ received: true });
-    }
     if (typeof entity["order_id"] !== "string") {
       return new Response("Invalid payment webhook payload", { status: 400 });
     }

@@ -5,8 +5,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase-config";
 import {
+  clearPasswordRecoveryRequest,
   consumeBrowserOAuthReturnPath,
+  getOAuthCallbackReturnPath,
   isPasswordRecoveryCallbackUrl,
+  isPendingPasswordRecoveryCallback,
   saveLastVisitedPath,
 } from "@/lib/auth-redirect";
 
@@ -36,9 +39,25 @@ export function CustomerAccounts({ children }: { children: ReactNode }) {
       return;
     }
     const callbackUrl = new URL(window.location.href);
-    const isRecoveryCallback = isPasswordRecoveryCallbackUrl(callbackUrl);
+    let isRecoveryCallback = isPasswordRecoveryCallbackUrl(callbackUrl);
+    if (!isRecoveryCallback) {
+      try {
+        isRecoveryCallback = isPendingPasswordRecoveryCallback(callbackUrl, localStorage);
+      } catch (storageError) {
+        console.error("[Auth] Could not read password recovery state", storageError);
+      }
+    }
+    if (isRecoveryCallback) {
+      try {
+        clearPasswordRecoveryRequest(localStorage);
+      } catch (storageError) {
+        console.error("[Auth] Could not clear password recovery state", storageError);
+      }
+    }
     if (window.location.pathname !== "/reset-password" && isRecoveryCallback) {
-      window.location.replace(`/reset-password${callbackUrl.search}${callbackUrl.hash}`);
+      callbackUrl.pathname = "/reset-password";
+      callbackUrl.searchParams.set("recovery", "1");
+      window.location.replace(`${callbackUrl.pathname}${callbackUrl.search}${callbackUrl.hash}`);
       return () => {
         active = false;
       };
@@ -64,7 +83,9 @@ export function CustomerAccounts({ children }: { children: ReactNode }) {
           window.location.pathname !== "/auth" &&
           window.location.pathname !== "/reset-password"
         ) {
-          const returnPath = consumeBrowserOAuthReturnPath();
+          const savedReturnPath = consumeBrowserOAuthReturnPath();
+          const returnPath =
+            getOAuthCallbackReturnPath(callbackUrl, savedReturnPath) ?? savedReturnPath;
           if (returnPath) {
             const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
             if (returnPath !== currentPath) window.location.replace(returnPath);
@@ -108,10 +129,11 @@ export function CustomerAccounts({ children }: { children: ReactNode }) {
         setReady(true);
         if (
           window.location.pathname !== "/auth" &&
-          window.location.pathname !== "/reset-password" &&
-          !callbackUrl.searchParams.has("code")
+          window.location.pathname !== "/reset-password"
         ) {
-          const returnPath = consumeBrowserOAuthReturnPath();
+          const savedReturnPath = consumeBrowserOAuthReturnPath();
+          const returnPath =
+            getOAuthCallbackReturnPath(callbackUrl, savedReturnPath) ?? savedReturnPath;
           if (returnPath) {
             const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
             if (returnPath !== currentPath) window.location.replace(returnPath);

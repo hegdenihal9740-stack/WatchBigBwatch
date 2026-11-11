@@ -164,10 +164,8 @@ export type Database = {
           id: string;
           idempotency_key: string;
           items: Json;
+          payment_method: string;
           payment_id: string | null;
-          payment_method: string;
-          razorpay_qr_code_id: string | null;
-          payment_method: string;
           razorpay_qr_code_id: string | null;
           razorpay_order_id: string | null;
           status: string;
@@ -183,10 +181,8 @@ export type Database = {
           id: string;
           idempotency_key: string;
           items: Json;
+          payment_method?: string;
           payment_id?: string | null;
-          payment_method?: string;
-          razorpay_qr_code_id?: string | null;
-          payment_method?: string;
           razorpay_qr_code_id?: string | null;
           razorpay_order_id?: string | null;
           status?: string;
@@ -202,10 +198,8 @@ export type Database = {
           id?: string;
           idempotency_key?: string;
           items?: Json;
+          payment_method?: string;
           payment_id?: string | null;
-          payment_method?: string;
-          razorpay_qr_code_id?: string | null;
-          payment_method?: string;
           razorpay_qr_code_id?: string | null;
           razorpay_order_id?: string | null;
           status?: string;

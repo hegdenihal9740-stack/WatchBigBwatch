@@ -2,6 +2,10 @@ import watchSteel from '@/assets/watch-steel.webp';
 import watchBlack from '@/assets/watch-black.webp';
 import watchGold from '@/assets/watch-gold.webp';
 import watchRosegold from '@/assets/watch-rosegold.webp';
+import watchSteelCard from '@/assets/watch-steel.jpg';
+import watchBlackCard from '@/assets/watch-black.jpg';
+import watchGoldCard from '@/assets/watch-gold.jpg';
+import watchRosegoldCard from '@/assets/watch-rosegold.jpg';
 
 export const watches = [
   { id: 'steel', name: 'Steel Diver', finish: 'Brushed steel', image: watchSteel, description: 'Cool brushed metal, a dark dial and a sculpted bracelet. A study in sharp contrasts.', details: ['Dark dial', 'Date window', 'Linked bracelet'] },
@@ -10,6 +14,18 @@ export const watches = [
   { id: 'rosegold', name: 'Rose Gold', finish: 'Rose gold', image: watchRosegold, description: 'Warm rose-toned metal frames a light face. A dark textured strap brings a softer contrast to the polished case.', details: ['Rose-toned case', 'Light dial', 'Textured strap'] },
 ] as const;
 export type WatchTone = typeof watches[number]['id'];
+export const watchImages: Record<WatchTone, string> = {
+  steel: watchSteel,
+  black: watchBlack,
+  gold: watchGold,
+  rosegold: watchRosegold,
+};
+export const watchThumbnails: Record<WatchTone, string> = {
+  steel: watchSteelCard,
+  black: watchBlackCard,
+  gold: watchGoldCard,
+  rosegold: watchRosegoldCard,
+};
 export const watchPrices: Record<WatchTone, number> = { steel: 12800, black: 14500, gold: 18500, rosegold: 16900 };
 
 export const watchCloseups: Record<WatchTone, readonly { title: string; description: string }[]> = {

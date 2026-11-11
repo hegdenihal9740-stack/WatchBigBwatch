@@ -4,12 +4,16 @@ import {
   createAuthEntryPath,
   consumeBrowserOAuthReturnPath,
   consumeOAuthReturnPath,
+  clearPasswordRecoveryRequest,
   getPostAuthPath,
+  getOAuthCallbackReturnPath,
   getSafeReturnPath,
   isPasswordRecoveryCallbackUrl,
+  isPendingPasswordRecoveryCallback,
   readLastVisitedPath,
   readBrowserOAuthReturnPath,
   readOAuthReturnPath,
+  savePasswordRecoveryRequest,
   saveBrowserOAuthReturnPath,
   saveLastVisitedPath,
   saveOAuthReturnPath,
@@ -72,6 +76,26 @@ describe("auth redirect handling", () => {
     expect(getPostAuthPath("//example.com")).toBe("/");
   });
 
+  it("restores a saved watch destination after a root-level OAuth callback", () => {
+    const callback = new URL("https://shop.example/?code=oauth-code");
+    expect(getOAuthCallbackReturnPath(callback, "/shop/gold?variant=steel")).toBe(
+      "/shop/gold?variant=steel",
+    );
+    expect(getOAuthCallbackReturnPath(callback, null)).toBeNull();
+    expect(getOAuthCallbackReturnPath(new URL("https://shop.example/"), "/shop/gold")).toBeNull();
+  });
+
+  it("prefers a safe destination carried by the OAuth callback", () => {
+    const callback = new URL(
+      "https://shop.example/?code=oauth-code&next=%2Fshop%2Frosegold%3Fvariant%3Dgold",
+    );
+    expect(getOAuthCallbackReturnPath(callback, "/shop/steel")).toBe("/shop/rosegold?variant=gold");
+    const unsafeCallback = new URL(
+      "https://shop.example/?code=oauth-code&next=https%3A%2F%2Fevil.example",
+    );
+    expect(getOAuthCallbackReturnPath(unsafeCallback, "/shop/steel")).toBe("/shop/steel");
+  });
+
   it.each([
     ["https://shop.example/#access_token=token&type=recovery", true],
     ["https://shop.example/reset-password?token_hash=token&type=recovery", true],
@@ -79,6 +103,39 @@ describe("auth redirect handling", () => {
     ["https://shop.example/?next=%2Faccount", false],
   ])("recognizes password recovery callbacks (%s)", (input, expected) => {
     expect(isPasswordRecoveryCallbackUrl(new URL(input))).toBe(expected);
+  });
+
+  it("recognizes a PKCE recovery callback at the site root only after a reset was requested", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    };
+    const callback = new URL("https://shop.example/?code=one-time-code");
+
+    expect(isPendingPasswordRecoveryCallback(callback, storage, 1000)).toBe(false);
+    savePasswordRecoveryRequest(storage, 1000);
+    expect(isPendingPasswordRecoveryCallback(callback, storage, 2000)).toBe(true);
+    expect(
+      isPendingPasswordRecoveryCallback(new URL("https://shop.example/?code=other"), storage, 2000),
+    ).toBe(true);
+    clearPasswordRecoveryRequest(storage);
+    expect(isPendingPasswordRecoveryCallback(callback, storage, 2000)).toBe(false);
+  });
+
+  it("expires stale recovery intent instead of redirecting later sign-ins", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    };
+    const callback = new URL("https://shop.example/?code=one-time-code");
+    savePasswordRecoveryRequest(storage, 1000);
+
+    expect(isPendingPasswordRecoveryCallback(callback, storage, 60 * 60 * 1000 + 1001)).toBe(false);
+    expect(values.size).toBe(0);
   });
 
   it("returns profile-link sign-ins to their original page instead of the profile editor", () => {
@@ -153,7 +210,10 @@ describe("auth redirect handling", () => {
     saveOAuthReturnPath(storage, "//example.com", 1000);
     expect(consumeOAuthReturnPath(storage, 1000)).toBe("/");
 
+    saveOAuthReturnPath(storage, "/shop/gold", 1000);
+    expect(consumeOAuthReturnPath(storage, 23 * 60 * 60 * 1000)).toBe("/shop/gold");
+
     saveOAuthReturnPath(storage, "/account", 1000);
-    expect(consumeOAuthReturnPath(storage, 15 * 60 * 1000 + 1001)).toBeNull();
+    expect(consumeOAuthReturnPath(storage, 24 * 60 * 60 * 1000 + 1001)).toBeNull();
   });
 });

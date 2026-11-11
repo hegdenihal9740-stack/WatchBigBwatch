@@ -26,14 +26,34 @@ import steelTry from "@/assets/try-on-steel.webp";
 import blackTry from "@/assets/try-on-black.webp";
 import goldTry from "@/assets/try-on-gold.webp";
 import roseTry from "@/assets/try-on-rosegold.webp";
-import steelHand from "@/assets/hand-steel.jpg";
-import blackHand from "@/assets/hand-black.jpg";
-import goldHand from "@/assets/hand-gold.jpg";
-import roseHand from "@/assets/hand-rosegold.jpg";
-import steelLife from "@/assets/lifestyle-steel.jpg";
-import blackLife from "@/assets/lifestyle-black.jpg";
-import goldLife from "@/assets/lifestyle-gold.jpg";
-import roseLife from "@/assets/lifestyle-rosegold.jpg";
+import steelHand from "@/assets/hand-steel.webp";
+import blackHand from "@/assets/hand-black.webp";
+import goldHand from "@/assets/hand-gold.webp";
+import roseHand from "@/assets/hand-rosegold.webp";
+import steelLife from "@/assets/lifestyle-steel.webp";
+import blackLife from "@/assets/lifestyle-black.webp";
+import goldLife from "@/assets/lifestyle-gold.webp";
+import roseLife from "@/assets/lifestyle-rosegold.webp";
+import steelCoverThumb from "@/assets/product-gallery-thumbnails/steel-watch-cover.webp";
+import blackCoverThumb from "@/assets/product-gallery-thumbnails/black-watch-cover.webp";
+import goldCoverThumb from "@/assets/product-gallery-thumbnails/gold-watch-cover.webp";
+import roseCoverThumb from "@/assets/product-gallery-thumbnails/rosegold-watch-cover.webp";
+import steelLifeThumb from "@/assets/product-gallery-thumbnails/steel-lifestyle.webp";
+import blackLifeThumb from "@/assets/product-gallery-thumbnails/black-lifestyle.webp";
+import goldLifeThumb from "@/assets/product-gallery-thumbnails/gold-lifestyle.webp";
+import roseLifeThumb from "@/assets/product-gallery-thumbnails/rosegold-lifestyle.webp";
+import steelHandThumb from "@/assets/product-gallery-thumbnails/steel-hand.webp";
+import blackHandThumb from "@/assets/product-gallery-thumbnails/black-hand.webp";
+import goldHandThumb from "@/assets/product-gallery-thumbnails/gold-hand.webp";
+import roseHandThumb from "@/assets/product-gallery-thumbnails/rosegold-hand.webp";
+import steelDetailThumb from "@/assets/product-gallery-thumbnails/steel-watch-detail.webp";
+import blackDetailThumb from "@/assets/product-gallery-thumbnails/black-watch-detail.webp";
+import goldDetailThumb from "@/assets/product-gallery-thumbnails/gold-watch-detail.webp";
+import roseDetailThumb from "@/assets/product-gallery-thumbnails/rosegold-watch-detail.webp";
+import steelTryThumb from "@/assets/product-gallery-thumbnails/steel-try-on.webp";
+import blackTryThumb from "@/assets/product-gallery-thumbnails/black-try-on.webp";
+import goldTryThumb from "@/assets/product-gallery-thumbnails/gold-try-on.webp";
+import roseTryThumb from "@/assets/product-gallery-thumbnails/rosegold-try-on.webp";
 import { cardMeta } from "@/lib/watch-meta";
 const FEAT = "feat:";
 const isFeat = (s?: string) => !!s && s.startsWith(FEAT);
@@ -70,9 +90,31 @@ const extra: Record<WatchTone, string[]> = {
   gold: [goldHand, goldJpg, goldTry],
   rosegold: [roseHand, roseJpg, roseTry],
 };
+const galleryThumbByImage: Record<string, string> = {
+  [watchImages.steel]: steelCoverThumb,
+  [watchImages.black]: blackCoverThumb,
+  [watchImages.gold]: goldCoverThumb,
+  [watchImages.rosegold]: roseCoverThumb,
+  [steelLife]: steelLifeThumb,
+  [blackLife]: blackLifeThumb,
+  [goldLife]: goldLifeThumb,
+  [roseLife]: roseLifeThumb,
+  [steelHand]: steelHandThumb,
+  [blackHand]: blackHandThumb,
+  [goldHand]: goldHandThumb,
+  [roseHand]: roseHandThumb,
+  [steelJpg]: steelDetailThumb,
+  [blackJpg]: blackDetailThumb,
+  [goldJpg]: goldDetailThumb,
+  [roseJpg]: roseDetailThumb,
+  [steelTry]: steelTryThumb,
+  [blackTry]: blackTryThumb,
+  [goldTry]: goldTryThumb,
+  [roseTry]: roseTryThumb,
+};
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { cart, getProductPrice } from "@/lib/cart";
-import { watches, type WatchTone } from "@/lib/watches";
+import { watchImages, watches, type WatchTone } from "@/lib/watches";
 import { createAuthEntryPath, saveBrowserOAuthReturnPath } from "@/lib/auth-redirect";
 
 const usd = (n: number) => n.toLocaleString("en-IN");
@@ -106,8 +148,9 @@ export function ProductDetails({
   );
   const productImages =
     "images" in w && Array.isArray(w.images)
-      ? w.images.filter((image): image is string => typeof image === "string")
+      ? w.images.filter((image): image is string => typeof image === "string" && image.length > 0)
       : [];
+  const featureImage = watchImages[w.id as keyof typeof watchImages] ?? productImages[0] ?? w.image;
   const stock = useStock();
   const left = stock?.[active];
   const price = getProductPrice(w.id);
@@ -122,7 +165,7 @@ export function ProductDetails({
         ...(life[w.id] ? [life[w.id]!] : []),
         ...(extra[w.id] ?? []),
       ];
-  const feat = <FeatureCard img={w.image} labels={specs.map(({ value }) => value)} />;
+  const feat = <FeatureCard img={featureImage} labels={specs.map(({ value }) => value)} />;
   const [idx, setIdx] = useState(0);
   const [zoom, setZoom] = useState(false);
   const off = price === undefined ? 0 : Math.round((1 - price / m.list) * 100);
@@ -263,7 +306,7 @@ export function ProductDetails({
                   {imgs.map((src, i) =>
                     isFeat(src) ? (
                       <div key={src} className="product-imgbox product-slide is-feat">
-                        {feat}
+                        {i === idx ? feat : null}
                       </div>
                     ) : (
                       <div
@@ -271,7 +314,14 @@ export function ProductDetails({
                         className={`product-imgbox product-slide is-zoomable ${i === idx ? "is-active" : ""} ${i === idx && zoom ? "is-zoomed" : ""}`}
                         onClick={() => toggleImageZoom(i)}
                       >
-                        <img src={src} alt={w.name} draggable={false} />
+                        <img
+                          src={i === idx ? src : undefined}
+                          alt={w.name}
+                          draggable={false}
+                          loading={i === 0 ? "eager" : "lazy"}
+                          fetchPriority={i === 0 ? "high" : "auto"}
+                          decoding="async"
+                        />
                       </div>
                     ),
                   )}
@@ -309,7 +359,12 @@ export function ProductDetails({
                     {isFeat(src) ? (
                       <span className="product-thumb-vid">Key</span>
                     ) : (
-                      <img src={src} alt="" />
+                      <img
+                        src={galleryThumbByImage[src] ?? src}
+                        alt=""
+                        loading={i === idx ? "eager" : "lazy"}
+                        decoding="async"
+                      />
                     )}
                   </button>
                 ))}
@@ -498,7 +553,7 @@ export function ProductDetails({
                           });
                         }}
                       >
-                        <img src={r.image} alt={r.name} />
+                        <img src={r.image} alt={r.name} loading="lazy" decoding="async" />
                         <span className="product-rec-name">{r.name}</span>
                         <span className="product-rec-sub">{r.finish}</span>
                         <span className="product-rec-price">

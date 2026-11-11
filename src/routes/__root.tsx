@@ -15,7 +15,9 @@ import { CartDrawer } from "@/components/CartDrawer";
 import { CustomerAccounts } from "@/components/CustomerAccounts";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
-import { ensureProducts } from "@/lib/products";
+
+const googleFontsStylesheet =
+  "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Karla:wght@400;500;600&display=swap";
 
 function NotFoundComponent() {
   return (
@@ -99,10 +101,6 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "icon", href: "/favicon.png", type: "image/png" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-      {
-        rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Karla:wght@400;500;600&display=swap",
-      },
     ],
   }),
   shellComponent: RootShell,
@@ -116,6 +114,7 @@ function RootShell({ children }: { children: ReactNode }) {
     <html lang="en">
       <head>
         <HeadContent />
+        <link rel="preload" as="style" href={googleFontsStylesheet} />
       </head>
       <body>
         {children}
@@ -129,9 +128,38 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
   useEffect(() => {
-    void ensureProducts().catch((error: unknown) => {
-      console.error("Could not load the product catalog", error);
-    });
+    const stylesheet = document.createElement("link");
+    stylesheet.rel = "stylesheet";
+    stylesheet.href = googleFontsStylesheet;
+    stylesheet.onerror = () => console.error("Could not load the Google Fonts stylesheet");
+    document.head.appendChild(stylesheet);
+    return () => stylesheet.remove();
+  }, []);
+
+  useEffect(() => {
+    if (window.location.pathname === "/") return;
+
+    let timer: number | undefined;
+    const loadCatalog = () => {
+      timer = window.setTimeout(
+        () => {
+          void import("@/lib/products")
+            .then(({ ensureProducts }) => ensureProducts())
+            .catch((error: unknown) => {
+              console.error("Could not load the product catalog", error);
+            });
+        },
+        0,
+      );
+    };
+
+    if (document.readyState === "complete") loadCatalog();
+    else window.addEventListener("load", loadCatalog, { once: true });
+
+    return () => {
+      window.removeEventListener("load", loadCatalog);
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, []);
 
   return (

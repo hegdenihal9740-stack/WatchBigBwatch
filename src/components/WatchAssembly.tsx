@@ -79,7 +79,7 @@ export function WatchAssembly({ tone = 'steel' }: { tone?: WatchTone }) {
   }, []);
   return <div ref={ref} className={`watch-assembly-track${reducedMotion ? ' watch-assembly-static' : ''}`} aria-hidden="true">
     <div className="watch-assembly-stage"><div className="watch-assembly-scene">
-    {mounted && visible && <Canvas frameloop="demand" onCreated={({ gl, invalidate: invalidateFrame }) => { gl.debug.checkShaderErrors = false; invalidate.current = invalidateFrame; invalidateFrame(); }} dpr={[1, 1.5]} camera={{ position: [0, 0, 8.6], fov: 42 }} gl={{ antialias: true, alpha: true }}>
+    {mounted && visible && <Canvas frameloop="demand" onCreated={({ gl, invalidate: invalidateFrame }) => { gl.debug.checkShaderErrors = false; invalidate.current = invalidateFrame; invalidateFrame(); }} dpr={[1, 1.25]} camera={{ position: [0, 0, 8.6], fov: 42 }} gl={{ antialias: true, alpha: true }}>
       <ambientLight intensity={.8} />
       <directionalLight position={[3, 5, 6]} intensity={3} />
       <directionalLight position={[-4, -1, 3]} intensity={1.6} />

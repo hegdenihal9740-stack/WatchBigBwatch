@@ -6,6 +6,7 @@ import {
   checkRazorpayPaymentStatus as checkRazorpayPaymentStatusOnServer,
   createRazorpayPaymentOrder as createRazorpayPaymentOrderOnServer,
   listRazorpayPaymentAttempts as listRazorpayPaymentAttemptsOnServer,
+  resumeRazorpayPaymentOrder as resumeRazorpayPaymentOrderOnServer,
   verifyRazorpayPayment as verifyRazorpayPaymentOnServer,
 } from "@/lib/razorpay.server";
 
@@ -52,7 +53,6 @@ export const createRazorpayPaymentOrder = createServerFn({ method: "POST" })
       address: addressSchema,
       idempotencyKey: z.string().uuid(),
       clearCart: z.boolean(),
-      paymentMethod: z.enum(["razorpay", "upi", "qr"]),
     }),
   )
   .handler(async ({ data, context }) =>
@@ -63,7 +63,17 @@ export const createRazorpayPaymentOrder = createServerFn({ method: "POST" })
       data.address,
       data.idempotencyKey,
       data.clearCart,
-      data.paymentMethod,
+    ),
+  );
+
+export const resumeRazorpayPaymentOrder = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(z.object({ orderId: z.string().regex(/^PF[A-F0-9]{20}$/) }))
+  .handler(async ({ data, context }) =>
+    resumeRazorpayPaymentOrderOnServer(
+      context.userId,
+      data.orderId,
+      typeof context.claims["email"] === "string" ? context.claims["email"] : null,
     ),
   );
 
